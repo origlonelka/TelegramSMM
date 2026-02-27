@@ -179,6 +179,7 @@ def _tdata_to_session(tdata_path: str, session_path: str, api_id: int) -> None:
     tdata_result = read_tdata(tdata_path)
     auth_key = tdata_result["auth_key"]  # 256 bytes
     dc_id = tdata_result["dc_id"]
+    user_id = tdata_result["user_id"]
 
     session_file = f"{session_path}.session"
     conn = sqlite3.connect(session_file)
@@ -210,8 +211,8 @@ def _tdata_to_session(tdata_path: str, session_path: str, api_id: int) -> None:
         """)
         conn.execute("INSERT INTO version VALUES (?)", (3,))
         conn.execute(
-            "INSERT INTO sessions VALUES (?, ?, 0, ?, 0, 0, 0)",
-            (dc_id, api_id, auth_key),
+            "INSERT INTO sessions VALUES (?, ?, 0, ?, 0, ?, 0)",
+            (dc_id, api_id, auth_key, user_id),
         )
         conn.commit()
     finally:
