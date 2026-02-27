@@ -44,7 +44,7 @@ async def autoreg_menu(callback: CallbackQuery, state: FSMContext):
         f"SMS-сервис: {key_status}{balance_text}\n"
         f"🌍 Страна: {country_name}\n"
         f"🔢 Количество: {count}\n\n"
-        f"Используется sms-activate.org для получения SMS.\n"
+        f"Используется hero-sms.com для получения SMS.\n"
         f"Прокси из пула назначаются автоматически."
     )
     await callback.message.edit_text(
@@ -58,8 +58,8 @@ async def autoreg_menu(callback: CallbackQuery, state: FSMContext):
 async def areg_set_key_start(callback: CallbackQuery, state: FSMContext):
     await state.set_state(SetSmsKey.key)
     await callback.message.edit_text(
-        "🔑 <b>SMS-Activate API ключ</b>\n\n"
-        "Получите ключ на <b>sms-activate.org</b>:\n"
+        "🔑 <b>HeroSMS API ключ</b>\n\n"
+        "Получите ключ на <b>hero-sms.com</b>:\n"
         "Профиль → API → Скопировать ключ\n\n"
         "Вставьте ключ:",
         reply_markup=back_kb("autoreg"),

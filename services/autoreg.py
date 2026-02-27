@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 os.makedirs(SESSIONS_DIR, exist_ok=True)
 
-SMS_ACTIVATE_URL = "https://api.sms-activate.org/stubs/handler_api.php"
+SMS_ACTIVATE_URL = "https://hero-sms.com/stubs/handler_api.php"
 
 COUNTRIES = {
     0: "🇷🇺 Россия",
@@ -51,7 +51,7 @@ async def set_setting(key: str, value: str):
         await execute("INSERT INTO bot_settings (key, value) VALUES (?, ?)", (key, value))
 
 
-# --- SMS-Activate API ---
+# --- HeroSMS API ---
 
 async def _sms_request(params: dict) -> str:
     api_key = await get_setting("sms_api_key")
