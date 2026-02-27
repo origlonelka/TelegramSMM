@@ -98,7 +98,7 @@ class MyGameServer : GameServer<MyPlayer>
             {
                 if (msg == "!help")
                 {
-                    player.Message("!discord - Ссылка на наш дискорд \r\n !report [SteamID] [Причина] - Отправить репорт на игрока \r\n !kick [SteamID] - Кикнуть игрока \r\n !setserverpass [Пароль] - Изменить пароль на сервере \r\n !setserverping [Максимально пинг] - Изменить максимальный пинг на сервере \r\n !an [Текст] - Объявление в UI \r\n !say [Текст] - Объявление в чат \r\n !forcestart - Запустить матч \r\n !endgame - Завершить матч \r\n !kill [SteamID] - Убить игрока \r\n !squadkick [SteamID] - Кикнуть игрока со сквада \r\n !squaddisband [SteamID] - Распустить сквад \r\n !squadpromote [SteamID] - Повысить до сквад лидера \r\n !warn [SteamdID] [Сообщение] - Выдать предупреждение игроку \r\n !setgamerole [steamdID] [Assault = 0, Medic = 1, Support = 2, Engineer = 3, Recon = 4, Leader = 5] - Сменить игровую роль игрока \r\n !sethp [SteamID] [HP] - Установить хп игроку \r\n !banweapon [оружие] - Заблокировать оружие \r\n !unbanweapon [оружие] - Разаблокировать оружие");
+                    player.Message("!discord - Ссылка на наш дискорд \r\n !report [SteamID] [Причина] - Отправить репорт на игрока \r\n !kick [SteamID] - Кикнуть игрока \r\n !setserverpass [Пароль] - Изменить пароль на сервере \r\n !setserverping [Максимально пинг] - Изменить максимальный пинг на сервере \r\n !an [Текст] - Рекламный скрипт \r\n !say [Текст] - Объявление в чат \r\n !forcestart - Запустить матч \r\n !endgame - Завершить матч \r\n !kill [SteamID] - Убить игрока \r\n !squadkick [SteamID] - Кикнуть игрока со сквада \r\n !squaddisband [SteamID] - Распустить сквад \r\n !squadpromote [SteamID] - Повысить до сквад лидера \r\n !warn [SteamdID] [Сообщение] - Выдать предупреждение игроку \r\n !setgamerole [steamdID] [Assault = 0, Medic = 1, Support = 2, Engineer = 3, Recon = 4, Leader = 5] - Сменить игровую роль игрока \r\n !sethp [SteamID] [HP] - Установить хп игроку \r\n !banweapon [оружие] - Заблокировать оружие \r\n !unbanweapon [оружие] - Разаблокировать оружие");
                 }
                 if (msg == "!banweapon")
                 {
@@ -309,7 +309,7 @@ class MyGameServer : GameServer<MyPlayer>
             {
                 if (msg == "!help")
                 {
-                    player.Message("!discord - Ссылка на наш дискорд \r\n !report [SteamID] [Причина] - Отправить репорт на игрока \r\n !kick [SteamID] - Кикнуть игрока \r\n !an [Текст] - Объявление в UI \r\n !say [Текст] - Объявление в чат \r\n !forcestart - Запустить матч \r\n !endgame - Завершить матч \r\n !kill [SteamID] - Убить игрока \r\n !squadkick [SteamID] - Кикнуть игрока со сквада \r\n !squaddisband [SteamID] - Распустить сквад \r\n !squadpromote [SteamID] - Повысить до сквад лидера \r\n !warn [SteamdID] [Сообщение] - Выдать предупреждение игроку \r\n !setgamerole [steamdID] [Assault = 0, Medic = 1, Support = 2, Engineer = 3, Recon = 4, Leader = 5] - Сменить игровую роль игрока \r\n !sethp [SteamID] [HP] - Установить хп игроку");
+                    player.Message("!discord - Ссылка на наш дискорд \r\n !report [SteamID] [Причина] - Отправить репорт на игрока \r\n !kick [SteamID] - Кикнуть игрока \r\n !an [Текст] - Рекламный скрипт \r\n !say [Текст] - Объявление в чат \r\n !forcestart - Запустить матч \r\n !endgame - Завершить матч \r\n !kill [SteamID] - Убить игрока \r\n !squadkick [SteamID] - Кикнуть игрока со сквада \r\n !squaddisband [SteamID] - Распустить сквад \r\n !squadpromote [SteamID] - Повысить до сквад лидера \r\n !warn [SteamdID] [Сообщение] - Выдать предупреждение игроку \r\n !setgamerole [steamdID] [Assault = 0, Medic = 1, Support = 2, Engineer = 3, Recon = 4, Leader = 5] - Сменить игровую роль игрока \r\n !sethp [SteamID] [HP] - Установить хп игроку");
                 }
                 if (msg == "!kick")
                 {
@@ -468,7 +468,7 @@ class MyGameServer : GameServer<MyPlayer>
             {
                 if (msg == "!help")
                 {
-                    player.Message("!discord - Ссылка на наш дискорд \r\n !report [SteamID] [Причина] - Отправить репорт на игрока \r\n !kick [SteamID] - Кикнуть игрока \r\n !an [Текст] - Объявление в UI \r\n !say [Текст] - Объявление в чат \r\n !kill [SteamID] - Убить игрока \r\n !squadkick [SteamID] - Кикнуть игрока со сквада \r\n !warn [SteamdID] [Сообщение] - Выдать предупреждение игроку");
+                    player.Message("!discord - Ссылка на наш дискорд \r\n !report [SteamID] [Причина] - Отправить репорт на игрока \r\n !kick [SteamID] - Кикнуть игрока \r\n !an [Текст] - Рекламный скрипт \r\n !say [Текст] - Объявление в чат \r\n !kill [SteamID] - Убить игрока \r\n !squadkick [SteamID] - Кикнуть игрока со сквада \r\n !warn [SteamdID] [Сообщение] - Выдать предупреждение игроку");
                 }
                 if (msg == "!kick")
                 {
