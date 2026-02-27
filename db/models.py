@@ -74,6 +74,37 @@ CREATE TABLE IF NOT EXISTS account_templates (
     created_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS presets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    template_id INTEGER,
+    campaign_id INTEGER,
+    mode TEXT DEFAULT 'comments',
+    delay_min INTEGER DEFAULT 60,
+    delay_max INTEGER DEFAULT 300,
+    hourly_limit INTEGER DEFAULT 5,
+    daily_limit INTEGER DEFAULT 30,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (template_id) REFERENCES account_templates(id) ON DELETE SET NULL,
+    FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS preset_channels (
+    preset_id INTEGER NOT NULL,
+    channel_id INTEGER NOT NULL,
+    PRIMARY KEY (preset_id, channel_id),
+    FOREIGN KEY (preset_id) REFERENCES presets(id) ON DELETE CASCADE,
+    FOREIGN KEY (channel_id) REFERENCES channels(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS preset_messages (
+    preset_id INTEGER NOT NULL,
+    message_id INTEGER NOT NULL,
+    PRIMARY KEY (preset_id, message_id),
+    FOREIGN KEY (preset_id) REFERENCES presets(id) ON DELETE CASCADE,
+    FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     account_id INTEGER,

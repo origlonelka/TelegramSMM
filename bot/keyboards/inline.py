@@ -7,6 +7,7 @@ def main_menu_kb() -> InlineKeyboardMarkup:
          InlineKeyboardButton(text="📢 Каналы", callback_data="channels")],
         [InlineKeyboardButton(text="💬 Сообщения", callback_data="messages"),
          InlineKeyboardButton(text="🚀 Кампании", callback_data="campaigns")],
+        [InlineKeyboardButton(text="📦 Пресеты", callback_data="presets")],
         [InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings"),
          InlineKeyboardButton(text="📊 Статистика", callback_data="stats")],
     ])
@@ -297,6 +298,120 @@ def tpl_select_acc_kb(accounts: list, tpl_id: int) -> InlineKeyboardMarkup:
     buttons.append([InlineKeyboardButton(
         text="◀️ Назад", callback_data=f"tpl_view_{tpl_id}")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+# --- Пресеты ---
+
+def presets_menu_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Создать пресет", callback_data="prs_add")],
+        [InlineKeyboardButton(text="📋 Список пресетов", callback_data="prs_list")],
+        [InlineKeyboardButton(text="◀️ Главное меню", callback_data="back_main")],
+    ])
+
+
+def preset_list_kb(presets: list) -> InlineKeyboardMarkup:
+    buttons = []
+    for prs in presets:
+        buttons.append([InlineKeyboardButton(
+            text=f"📦 {prs['name']}",
+            callback_data=f"prs_view_{prs['id']}"
+        )])
+    buttons.append([InlineKeyboardButton(text="◀️ К пресетам", callback_data="presets")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def preset_item_kb(prs_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="🔄 Активировать", callback_data=f"prs_activate_{prs_id}")],
+        [InlineKeyboardButton(
+            text="👤 Шаблон профиля", callback_data=f"prs_tpl_{prs_id}"),
+         InlineKeyboardButton(
+            text="🎯 Режим", callback_data=f"prs_mode_{prs_id}")],
+        [InlineKeyboardButton(
+            text="📢 Каналы", callback_data=f"prs_channels_{prs_id}"),
+         InlineKeyboardButton(
+            text="💬 Сообщения", callback_data=f"prs_messages_{prs_id}")],
+        [InlineKeyboardButton(
+            text="⚙️ Лимиты", callback_data=f"prs_limits_{prs_id}")],
+        [InlineKeyboardButton(
+            text="🗑 Удалить", callback_data=f"prs_del_{prs_id}")],
+        [InlineKeyboardButton(text="◀️ К пресетам", callback_data="presets")],
+    ])
+
+
+def prs_mode_kb(prs_id: int, current_mode: str) -> InlineKeyboardMarkup:
+    buttons = []
+    for mode, label in MODE_LABELS.items():
+        check = "✅ " if mode == current_mode else ""
+        buttons.append([InlineKeyboardButton(
+            text=f"{check}{label}",
+            callback_data=f"prs_setmode_{prs_id}_{mode}"
+        )])
+    buttons.append([InlineKeyboardButton(
+        text="◀️ К пресету", callback_data=f"prs_view_{prs_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def prs_tpl_select_kb(templates: list, prs_id: int,
+                       current_tpl_id: int | None) -> InlineKeyboardMarkup:
+    buttons = []
+    for tpl in templates:
+        check = "✅ " if tpl["id"] == current_tpl_id else ""
+        buttons.append([InlineKeyboardButton(
+            text=f"{check}👤 {tpl['name']}",
+            callback_data=f"prs_tpl_set_{prs_id}_{tpl['id']}"
+        )])
+    # Кнопка «без шаблона»
+    check = "✅ " if not current_tpl_id else ""
+    buttons.append([InlineKeyboardButton(
+        text=f"{check}🚫 Без шаблона",
+        callback_data=f"prs_tpl_clear_{prs_id}"
+    )])
+    buttons.append([InlineKeyboardButton(
+        text="◀️ К пресету", callback_data=f"prs_view_{prs_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def prs_select_items_kb(items: list, prefix: str, prs_id: int,
+                         selected_ids: set) -> InlineKeyboardMarkup:
+    buttons = []
+    for item in items:
+        d = dict(item)
+        check = "✅" if d["id"] in selected_ids else "⬜"
+        label = d.get("phone") or d.get("username") or d.get("text", "")[:30]
+        buttons.append([InlineKeyboardButton(
+            text=f"{check} {label}",
+            callback_data=f"{prefix}_toggle_{prs_id}_{d['id']}"
+        )])
+    buttons.append([InlineKeyboardButton(
+        text="💾 Сохранить", callback_data=f"prs_view_{prs_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def prs_limits_kb(prs_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="⏱ Мин. задержка", callback_data=f"prs_set_delay_min_{prs_id}"),
+         InlineKeyboardButton(
+            text="⏱ Макс. задержка", callback_data=f"prs_set_delay_max_{prs_id}")],
+        [InlineKeyboardButton(
+            text="🕐 Лимит/час", callback_data=f"prs_set_hourly_{prs_id}"),
+         InlineKeyboardButton(
+            text="📅 Лимит/день", callback_data=f"prs_set_daily_{prs_id}")],
+        [InlineKeyboardButton(
+            text="◀️ К пресету", callback_data=f"prs_view_{prs_id}")],
+    ])
+
+
+def prs_confirm_del_kb(prs_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="✅ Да, удалить", callback_data=f"prs_del_confirm_{prs_id}"),
+         InlineKeyboardButton(
+            text="❌ Отмена", callback_data=f"prs_view_{prs_id}")],
+    ])
 
 
 # --- Настройки ---

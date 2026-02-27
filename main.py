@@ -9,7 +9,7 @@ from core.config import BOT_TOKEN, ADMIN_IDS
 from db.database import init_db, close_db
 from core.scheduler import start_scheduler
 
-from bot.handlers import start, accounts, channels, messages, campaigns, settings, account_setup
+from bot.handlers import start, accounts, channels, messages, campaigns, settings, account_setup, presets
 
 
 class AccessMiddleware(BaseMiddleware):
@@ -62,6 +62,7 @@ async def main():
     dp.include_router(messages.router)
     dp.include_router(campaigns.router)
     dp.include_router(account_setup.router)
+    dp.include_router(presets.router)
     dp.include_router(settings.router)
 
     # Запуск планировщика
