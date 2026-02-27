@@ -613,6 +613,98 @@ async def acc_tdata_proxy(message: Message, state: FSMContext):
 
 
 # ============================================================
+# Проверка аккаунтов
+# ============================================================
+
+@router.callback_query(F.data == "acc_check_all")
+async def acc_check_all(callback: CallbackQuery):
+    accounts = await fetch_all("SELECT * FROM accounts ORDER BY id")
+    if not accounts:
+        await callback.answer("Нет аккаунтов для проверки", show_alert=True)
+        return
+
+    await callback.message.edit_text(
+        f"🔍 Проверяю {len(accounts)} аккаунтов...",
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+    from services.account_manager import check_account
+    valid = 0
+    invalid = 0
+    deleted_phones = []
+
+    for acc in accounts:
+        result = await check_account(acc)
+        if result["ok"]:
+            valid += 1
+            if result.get("phone"):
+                await execute(
+                    "UPDATE accounts SET phone = ?, status = 'active' WHERE id = ?",
+                    (result["phone"], acc["id"]),
+                )
+        else:
+            invalid += 1
+            deleted_phones.append(acc["phone"])
+            await execute("DELETE FROM accounts WHERE id = ?", (acc["id"],))
+            session_file = os.path.join("sessions", f"account_{acc['id']}.session")
+            if os.path.exists(session_file):
+                os.remove(session_file)
+
+    text = f"🔍 <b>Проверка завершена</b>\n\n✅ Валидных: {valid}\n❌ Невалидных: {invalid}"
+    if deleted_phones:
+        phones_list = "\n".join(f"• <code>{p}</code>" for p in deleted_phones)
+        text += f"\n\n🗑 Удалены:\n{phones_list}"
+
+    await callback.message.edit_text(
+        text,
+        reply_markup=accounts_menu_kb(),
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(F.data.startswith("acc_check_"))
+async def acc_check(callback: CallbackQuery):
+    acc_id = int(callback.data.split("_")[2])
+    acc = await fetch_one("SELECT * FROM accounts WHERE id = ?", (acc_id,))
+    if not acc:
+        await callback.answer("Аккаунт не найден", show_alert=True)
+        return
+
+    await callback.message.edit_text(
+        f"🔍 Проверяю аккаунт <code>{acc['phone']}</code>...",
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+    from services.account_manager import check_account
+    result = await check_account(acc)
+
+    if result["ok"]:
+        if result.get("phone"):
+            await execute(
+                "UPDATE accounts SET phone = ?, status = 'active' WHERE id = ?",
+                (result["phone"], acc_id),
+            )
+        await callback.message.edit_text(
+            f"✅ Аккаунт <code>{acc['phone']}</code> — валиден!",
+            reply_markup=account_item_kb(acc_id),
+            parse_mode="HTML",
+        )
+    else:
+        await execute("DELETE FROM accounts WHERE id = ?", (acc_id,))
+        session_file = os.path.join("sessions", f"account_{acc_id}.session")
+        if os.path.exists(session_file):
+            os.remove(session_file)
+        await callback.message.edit_text(
+            f"❌ Аккаунт <code>{acc['phone']}</code> невалиден — удалён.\n\n"
+            f"Ошибка: <code>{result['error'][:200]}</code>",
+            reply_markup=accounts_menu_kb(),
+            parse_mode="HTML",
+        )
+
+
+# ============================================================
 # Удаление
 # ============================================================
 

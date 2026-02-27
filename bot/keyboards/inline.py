@@ -24,6 +24,7 @@ def accounts_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="➕ Добавить аккаунт", callback_data="acc_add")],
         [InlineKeyboardButton(text="📋 Список аккаунтов", callback_data="acc_list")],
+        [InlineKeyboardButton(text="🔍 Проверить все", callback_data="acc_check_all")],
         [InlineKeyboardButton(text="◀️ Главное меню", callback_data="back_main")],
     ])
 
@@ -43,7 +44,8 @@ def account_item_kb(acc_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔑 Авторизовать", callback_data=f"acc_auth_{acc_id}"),
          InlineKeyboardButton(text="🌐 Прокси", callback_data=f"acc_proxy_{acc_id}")],
-        [InlineKeyboardButton(text="🗑 Удалить", callback_data=f"acc_del_{acc_id}")],
+        [InlineKeyboardButton(text="🔍 Проверить", callback_data=f"acc_check_{acc_id}"),
+         InlineKeyboardButton(text="🗑 Удалить", callback_data=f"acc_del_{acc_id}")],
         [InlineKeyboardButton(text="◀️ К аккаунтам", callback_data="accounts")],
     ])
 

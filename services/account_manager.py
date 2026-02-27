@@ -286,6 +286,31 @@ async def import_tdata(zip_path: str, api_id: int, api_hash: str,
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
+async def check_account(acc) -> dict:
+    """Проверяет валидность сессии аккаунта. Возвращает {"ok": True/False, ...}."""
+    acc_id = acc["id"]
+    try:
+        client = get_client(acc)
+        if not client.is_connected:
+            await client.start()
+        me = await client.get_me()
+        phone = f"+{me.phone_number}" if me.phone_number else None
+        await client.stop()
+        if acc_id in _clients:
+            del _clients[acc_id]
+        return {"ok": True, "phone": phone}
+    except Exception as e:
+        # Очищаем клиент при ошибке
+        if acc_id in _clients:
+            try:
+                if _clients[acc_id].is_connected:
+                    await _clients[acc_id].stop()
+            except Exception:
+                pass
+            del _clients[acc_id]
+        return {"ok": False, "error": str(e)}
+
+
 async def ensure_connected(acc) -> Client:
     client = get_client(acc)
     if not client.is_connected:

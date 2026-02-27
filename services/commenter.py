@@ -2,9 +2,9 @@ import random
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from pyrogram.errors import FloodWait, PeerFlood, UserBannedInChannel
+from pyrogram.errors import FloodWait, PeerFlood, UserBannedInChannel, AuthKeyUnregistered, UserDeactivated, UserDeactivatedBan
 from db.database import execute, fetch_one, fetch_all, execute_returning
-from services.account_manager import ensure_connected
+from services.account_manager import ensure_connected, disconnect
 from services.spintax import spin
 
 logger = logging.getLogger(__name__)
@@ -114,6 +114,16 @@ async def _send_comment(account, channel, message, camp):
                 f"@{channel['username']} (пост {post.id})"
             )
             break
+
+    except (AuthKeyUnregistered, UserDeactivated, UserDeactivatedBan) as e:
+        logger.error(f"Аккаунт #{account['id']} мёртв ({type(e).__name__}), удаляю")
+        await disconnect(account["id"])
+        await execute("DELETE FROM accounts WHERE id = ?", (account["id"],))
+        await execute_returning(
+            "INSERT INTO logs (account_id, channel_id, message_id, status, error) "
+            "VALUES (?, ?, ?, 'error', ?)",
+            (account["id"], channel["id"], message["id"], f"DELETED: {e}"),
+        )
 
     except FloodWait as e:
         logger.warning(f"FloodWait: аккаунт #{account['id']}, ждём {e.value} сек")
