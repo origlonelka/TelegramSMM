@@ -34,8 +34,8 @@ async def autoreg_menu(callback: CallbackQuery, state: FSMContext):
     balance_text = ""
     if api_key:
         try:
-            balance = await get_balance()
-            balance_text = f"\n💰 Баланс: {balance:.2f} ₽"
+            usd, rub = await get_balance()
+            balance_text = f"\n💰 Баланс: {rub:.2f} ₽ (${usd:.2f})"
         except Exception:
             balance_text = "\n💰 Баланс: ошибка"
 
@@ -82,9 +82,9 @@ async def areg_set_key_value(message: Message, state: FSMContext):
     # Проверяем ключ
     from services.autoreg import get_balance
     try:
-        balance = await get_balance()
+        usd, rub = await get_balance()
         await message.answer(
-            f"✅ Ключ сохранён!\n💰 Баланс: {balance:.2f} ₽",
+            f"✅ Ключ сохранён!\n💰 Баланс: {rub:.2f} ₽ (${usd:.2f})",
             reply_markup=autoreg_menu_kb(),
         )
     except Exception as e:
@@ -230,7 +230,7 @@ async def areg_start(callback: CallbackQuery):
 async def areg_balance(callback: CallbackQuery):
     from services.autoreg import get_balance
     try:
-        balance = await get_balance()
-        await callback.answer(f"💰 Баланс: {balance:.2f} ₽", show_alert=True)
+        usd, rub = await get_balance()
+        await callback.answer(f"💰 Баланс: {rub:.2f} ₽ (${usd:.2f})", show_alert=True)
     except Exception as e:
         await callback.answer(f"❌ {e}", show_alert=True)

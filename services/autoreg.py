@@ -65,10 +65,35 @@ async def _sms_request(params: dict) -> str:
             return await resp.text()
 
 
-async def get_balance() -> float:
+_usd_rub_cache: dict = {"rate": None, "ts": 0}
+
+
+async def _get_usd_rub() -> float:
+    """Курс USD→RUB через ЦБ РФ (кэш 1 час)."""
+    import time
+    now = time.time()
+    if _usd_rub_cache["rate"] and now - _usd_rub_cache["ts"] < 3600:
+        return _usd_rub_cache["rate"]
+    try:
+        url = "https://www.cbr-xml-daily.ru/daily_json.js"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                data = await resp.json(content_type=None)
+                rate = float(data["Valute"]["USD"]["Value"])
+                _usd_rub_cache["rate"] = rate
+                _usd_rub_cache["ts"] = now
+                return rate
+    except Exception:
+        return _usd_rub_cache["rate"] or 90.0  # fallback
+
+
+async def get_balance() -> tuple[float, float]:
+    """Возвращает (баланс_usd, баланс_rub)."""
     text = await _sms_request({"action": "getBalance"})
     if text.startswith("ACCESS_BALANCE:"):
-        return float(text.split(":")[1])
+        usd = float(text.split(":")[1])
+        rate = await _get_usd_rub()
+        return usd, usd * rate
     raise Exception(f"Ошибка: {text}")
 
 
