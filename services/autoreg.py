@@ -246,9 +246,6 @@ async def register_one_account(country: int = 0,
         try:
             await client.connect()
 
-            # Сообщаем SMS-сервису: готовы принять SMS (ДО send_code)
-            await _set_activation_status(activation_id, 1)
-
             sent_code = await client.send_code(phone)
             code_type = sent_code.type
             logger.info(f"Авторег {phone}: тип кода — {code_type}")
@@ -262,7 +259,7 @@ async def register_one_account(country: int = 0,
                 except Exception as e:
                     logger.warning(f"Авторег {phone}: resend_code не удался: {e}")
 
-            # Всё ещё не SMS — номер занят, отменяем и берём следующий
+            # Всё ещё не SMS — номер занят, отменяем (до setStatus=1 — возврат денег)
             if code_type not in _SMS_TYPES:
                 logger.warning(
                     f"Авторег {phone}: код через {code_type.name}, номер уже занят "
@@ -281,6 +278,9 @@ async def register_one_account(country: int = 0,
                 continue  # следующая попытка
 
             phone_code_hash = sent_code.phone_code_hash
+
+            # SMS подтверждён — теперь сообщаем сервису что готовы принять код
+            await _set_activation_status(activation_id, 1)
 
             if progress_callback:
                 await progress_callback(f"📱 {phone}\n📨 SMS\n⏳ Жду код...")
