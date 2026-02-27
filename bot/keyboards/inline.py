@@ -26,7 +26,8 @@ def accounts_menu_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="➕ Добавить аккаунт", callback_data="acc_add")],
         [InlineKeyboardButton(text="📋 Список аккаунтов", callback_data="acc_list")],
         [InlineKeyboardButton(text="🔍 Проверить все", callback_data="acc_check_all")],
-        [InlineKeyboardButton(text="👤 Шаблоны профиля", callback_data="acc_setup")],
+        [InlineKeyboardButton(text="👤 Шаблоны профиля", callback_data="acc_setup"),
+         InlineKeyboardButton(text="🌐 Прокси-пул", callback_data="proxy_pool")],
         [InlineKeyboardButton(text="◀️ Главное меню", callback_data="back_main")],
     ])
 
@@ -411,6 +412,57 @@ def prs_confirm_del_kb(prs_id: int) -> InlineKeyboardMarkup:
             text="✅ Да, удалить", callback_data=f"prs_del_confirm_{prs_id}"),
          InlineKeyboardButton(
             text="❌ Отмена", callback_data=f"prs_view_{prs_id}")],
+    ])
+
+
+# --- Прокси-пул ---
+
+def proxy_pool_menu_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📥 Импорт прокси", callback_data="prx_import")],
+        [InlineKeyboardButton(text="📋 Список прокси", callback_data="prx_list")],
+        [InlineKeyboardButton(text="🔍 Проверить все", callback_data="prx_check_all")],
+        [InlineKeyboardButton(text="📱 Автоназначение", callback_data="prx_auto_assign"),
+         InlineKeyboardButton(text="🔄 Ротация", callback_data="prx_rotate")],
+        [InlineKeyboardButton(text="🗑 Удалить мёртвые", callback_data="prx_del_dead")],
+        [InlineKeyboardButton(text="◀️ К аккаунтам", callback_data="accounts")],
+    ])
+
+
+def proxy_list_kb(proxies: list) -> InlineKeyboardMarkup:
+    buttons = []
+    for p in proxies:
+        status_map = {"alive": "🟢", "dead": "🔴", "unchecked": "⚪"}
+        icon = status_map.get(p["status"], "⚪")
+        acc = f" 📱" if p["account_id"] else ""
+        from urllib.parse import urlparse
+        parsed = urlparse(p["url"])
+        short = f"{parsed.hostname}:{parsed.port}"
+        buttons.append([InlineKeyboardButton(
+            text=f"{icon} {short}{acc}",
+            callback_data=f"prx_view_{p['id']}"
+        )])
+    buttons.append([InlineKeyboardButton(
+        text="◀️ К пулу", callback_data="proxy_pool")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def proxy_item_kb(prx_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="🔍 Проверить", callback_data=f"prx_check_{prx_id}"),
+         InlineKeyboardButton(
+            text="🗑 Удалить", callback_data=f"prx_del_{prx_id}")],
+        [InlineKeyboardButton(text="◀️ К списку", callback_data="prx_list")],
+    ])
+
+
+def prx_confirm_del_kb(prx_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="✅ Да, удалить", callback_data=f"prx_del_confirm_{prx_id}"),
+         InlineKeyboardButton(
+            text="❌ Отмена", callback_data=f"prx_view_{prx_id}")],
     ])
 
 

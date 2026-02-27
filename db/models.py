@@ -105,6 +105,18 @@ CREATE TABLE IF NOT EXISTS preset_messages (
     FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS proxies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    url TEXT UNIQUE NOT NULL,
+    type TEXT DEFAULT 'socks5',
+    status TEXT DEFAULT 'unchecked',
+    response_time INTEGER,
+    account_id INTEGER,
+    last_checked_at TEXT,
+    added_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE SET NULL
+);
+
 CREATE TABLE IF NOT EXISTS logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     account_id INTEGER,
