@@ -146,22 +146,39 @@ async def _wait_for_code(activation_id: str, timeout: int = 150) -> str | None:
     """Ждёт SMS-код от сервиса. Polling каждые 3 секунды."""
     api_key = await get_setting("sms_api_key")
     async with aiohttp.ClientSession() as session:
-        for _ in range(timeout // 3):
-            async with session.get(
-                SMS_ACTIVATE_URL,
-                params={
-                    "api_key": api_key,
-                    "action": "getStatus",
-                    "id": activation_id,
-                },
-                timeout=aiohttp.ClientTimeout(total=10),
-            ) as resp:
-                text = await resp.text()
-                if text.startswith("STATUS_OK:"):
-                    return text.split(":")[1]
-                if text == "STATUS_CANCEL":
-                    return None
+        for attempt in range(timeout // 3):
+            try:
+                async with session.get(
+                    SMS_ACTIVATE_URL,
+                    params={
+                        "api_key": api_key,
+                        "action": "getStatus",
+                        "id": activation_id,
+                    },
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    text = (await resp.text()).strip()
+
+                    if text.startswith("STATUS_OK:"):
+                        code = text.split(":")[1].strip()
+                        logger.info(f"SMS-код получен для активации {activation_id}: {code}")
+                        return code
+                    if text == "STATUS_CANCEL":
+                        logger.warning(f"Активация {activation_id} отменена сервисом")
+                        return None
+                    if text in ("NO_ACTIVATION", "BAD_KEY", "BAD_ACTION"):
+                        logger.error(f"Ошибка getStatus для {activation_id}: {text}")
+                        return None
+
+                    # STATUS_WAIT_CODE — штатно, ждём дальше
+                    if attempt % 10 == 0:
+                        logger.debug(f"getStatus {activation_id}: {text} (попытка {attempt})")
+
+            except Exception as e:
+                logger.warning(f"getStatus запрос упал для {activation_id}: {e}")
+
             await asyncio.sleep(3)
+    logger.warning(f"Таймаут ожидания SMS для активации {activation_id} ({timeout}с)")
     return None
 
 
@@ -219,12 +236,19 @@ async def register_one_account(country: int = 0,
 
     try:
         await client.connect()
+
+        # 3. Сообщаем SMS-сервису: готовы принять SMS (ДО send_code,
+        #    чтобы hero-sms перехватил SMS, которое Telegram отправит мгновенно)
+        await _set_activation_status(activation_id, 1)
+
         sent_code = await client.send_code(phone)
 
         # Проверяем тип доставки: если не SMS — пересылаем через SMS
         code_type = type(sent_code.type).__name__
         logger.info(f"Авторег {phone}: тип кода — {code_type}")
-        if "Sms" not in code_type:
+        sms_delivery = "Sms" in code_type
+
+        if not sms_delivery:
             try:
                 if progress_callback:
                     await progress_callback(
@@ -232,13 +256,21 @@ async def register_one_account(country: int = 0,
                 sent_code = await client.resend_code(phone, sent_code.phone_code_hash)
                 code_type = type(sent_code.type).__name__
                 logger.info(f"Авторег {phone}: повторный тип кода — {code_type}")
+                sms_delivery = "Sms" in code_type
             except Exception as e:
                 logger.warning(f"Авторег {phone}: resend_code не удался: {e}")
 
-        phone_code_hash = sent_code.phone_code_hash
+        if not sms_delivery:
+            logger.error(f"Авторег {phone}: не удалось получить SMS-доставку, тип: {code_type}")
+            await _set_activation_status(activation_id, 8)
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+            await _cleanup_account(acc_id, session_path)
+            return {"ok": False, "error": f"{phone} — Telegram отправил код через {code_type}, а не SMS"}
 
-        # 3. Сообщаем SMS-сервису: готовы принять SMS
-        await _set_activation_status(activation_id, 1)
+        phone_code_hash = sent_code.phone_code_hash
 
         if progress_callback:
             await progress_callback(f"📱 {phone}\n⏳ Жду SMS-код...")
