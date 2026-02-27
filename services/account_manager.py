@@ -225,10 +225,11 @@ async def import_tdata(zip_path: str, api_id: int, api_hash: str,
     try:
         # 1. Распаковываем ZIP
         tmp_dir = tempfile.mkdtemp(prefix="tdata_")
+        logger.info(f"[tdata] Шаг 1: распаковка ZIP в {tmp_dir}")
         with zipfile.ZipFile(zip_path, "r") as zf:
             zf.extractall(tmp_dir)
 
-        # Фиксим права на файлы после распаковки (ZIP может сохранять ограничительные Unix-права)
+        # Фиксим права на файлы после распаковки
         for root, dirs, files in os.walk(tmp_dir):
             for d in dirs:
                 os.chmod(os.path.join(root, d), 0o755)
@@ -239,12 +240,20 @@ async def import_tdata(zip_path: str, api_id: int, api_hash: str,
         tdata_path = _find_tdata_dir(tmp_dir)
         if not tdata_path:
             return {"ok": False, "error": "Папка tdata не найдена в архиве"}
+        logger.info(f"[tdata] Шаг 2: найдена папка tdata: {tdata_path}")
+
+        # Логируем содержимое папки tdata
+        tdata_files = os.listdir(tdata_path)
+        logger.info(f"[tdata] Файлы в tdata: {tdata_files}")
 
         # 3. Конвертируем в Pyrogram session
+        logger.info("[tdata] Шаг 3: конвертация tdata → session")
         session_path = _get_session_path(acc_id)
         _tdata_to_session(tdata_path, session_path, api_id)
+        logger.info("[tdata] Шаг 3: конвертация успешна")
 
         # 4. Подключаемся Pyrogram'ом для проверки
+        logger.info("[tdata] Шаг 4: проверка сессии через Pyrogram")
         proxy = _parse_proxy(proxy_str)
         client = Client(
             name=session_path,
@@ -258,7 +267,7 @@ async def import_tdata(zip_path: str, api_id: int, api_hash: str,
         await client.stop()
         _clients[acc_id] = client
 
-        logger.info(f"tdata imported for account #{acc_id}: {phone}")
+        logger.info(f"[tdata] Импорт завершён для #{acc_id}: {phone}")
         return {"ok": True, "phone": phone}
 
     except zipfile.BadZipFile:
@@ -268,7 +277,7 @@ async def import_tdata(zip_path: str, api_id: int, api_hash: str,
         session_file = _get_session_path(acc_id) + ".session"
         if os.path.exists(session_file):
             os.remove(session_file)
-        logger.error(f"tdata import error: {e}", exc_info=True)
+        logger.error(f"[tdata] Ошибка на этапе импорта: {e}", exc_info=True)
         return {"ok": False, "error": str(e)}
     finally:
         # Чистим временную папку
