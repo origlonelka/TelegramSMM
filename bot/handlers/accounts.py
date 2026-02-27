@@ -631,8 +631,10 @@ async def acc_check_all(callback: CallbackQuery):
 
     from services.account_manager import check_account
     valid = 0
-    invalid = 0
+    dead = 0
+    unreachable = 0
     deleted_phones = []
+    warn_phones = []
 
     for acc in accounts:
         result = await check_account(acc)
@@ -643,18 +645,28 @@ async def acc_check_all(callback: CallbackQuery):
                     "UPDATE accounts SET phone = ?, status = 'active' WHERE id = ?",
                     (result["phone"], acc["id"]),
                 )
-        else:
-            invalid += 1
+        elif result.get("dead"):
+            dead += 1
             deleted_phones.append(acc["phone"])
             await execute("DELETE FROM accounts WHERE id = ?", (acc["id"],))
             session_file = os.path.join("sessions", f"account_{acc['id']}.session")
             if os.path.exists(session_file):
                 os.remove(session_file)
+        else:
+            unreachable += 1
+            warn_phones.append(acc["phone"])
 
-    text = f"🔍 <b>Проверка завершена</b>\n\n✅ Валидных: {valid}\n❌ Невалидных: {invalid}"
+    text = f"🔍 <b>Проверка завершена</b>\n\n✅ Валидных: {valid}"
+    if dead:
+        text += f"\n❌ Мёртвых (удалены): {dead}"
+    if unreachable:
+        text += f"\n⚠️ Нет связи (не удалены): {unreachable}"
     if deleted_phones:
         phones_list = "\n".join(f"• <code>{p}</code>" for p in deleted_phones)
         text += f"\n\n🗑 Удалены:\n{phones_list}"
+    if warn_phones:
+        phones_list = "\n".join(f"• <code>{p}</code>" for p in warn_phones)
+        text += f"\n\n⚠️ Проверьте прокси:\n{phones_list}"
 
     await callback.message.edit_text(
         text,
@@ -691,15 +703,25 @@ async def acc_check(callback: CallbackQuery):
             reply_markup=account_item_kb(acc_id),
             parse_mode="HTML",
         )
-    else:
+    elif result.get("dead"):
+        # Мёртвый аккаунт — удаляем
         await execute("DELETE FROM accounts WHERE id = ?", (acc_id,))
         session_file = os.path.join("sessions", f"account_{acc_id}.session")
         if os.path.exists(session_file):
             os.remove(session_file)
         await callback.message.edit_text(
-            f"❌ Аккаунт <code>{acc['phone']}</code> невалиден — удалён.\n\n"
+            f"❌ Аккаунт <code>{acc['phone']}</code> мёртв — удалён.\n\n"
             f"Ошибка: <code>{result['error'][:200]}</code>",
             reply_markup=accounts_menu_kb(),
+            parse_mode="HTML",
+        )
+    else:
+        # Ошибка сети/таймаут — не удаляем
+        await callback.message.edit_text(
+            f"⚠️ Аккаунт <code>{acc['phone']}</code> — не удалось подключиться.\n\n"
+            f"<code>{result['error'][:200]}</code>\n\n"
+            f"Аккаунт <b>не удалён</b>. Проверьте прокси или сеть.",
+            reply_markup=account_item_kb(acc_id),
             parse_mode="HTML",
         )
 

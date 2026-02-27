@@ -287,8 +287,26 @@ async def import_tdata(zip_path: str, api_id: int, api_hash: str,
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
+_DEAD_ERRORS = (
+    "AUTH_KEY_UNREGISTERED", "USER_DEACTIVATED", "USER_DEACTIVATED_BAN",
+    "SESSION_REVOKED", "SESSION_EXPIRED", "AUTH_KEY_INVALID",
+)
+
+
+def _is_dead_error(error_str: str) -> bool:
+    """Проверяет, является ли ошибка признаком мёртвого аккаунта."""
+    upper = error_str.upper()
+    return any(code in upper for code in _DEAD_ERRORS)
+
+
 async def check_account(acc, timeout: int = 30) -> dict:
-    """Проверяет валидность сессии аккаунта. Возвращает {"ok": True/False, ...}."""
+    """Проверяет валидность сессии аккаунта.
+
+    Возвращает:
+        {"ok": True, "phone": ...} — аккаунт жив
+        {"ok": False, "dead": True, "error": ...} — аккаунт мёртв (удалять)
+        {"ok": False, "dead": False, "error": ...} — ошибка сети/таймаут (не удалять)
+    """
     acc_id = acc["id"]
 
     async def _do_check():
@@ -302,28 +320,29 @@ async def check_account(acc, timeout: int = 30) -> dict:
             del _clients[acc_id]
         return {"ok": True, "phone": phone}
 
+    def _cleanup():
+        if acc_id in _clients:
+            try:
+                if _clients[acc_id].is_connected:
+                    asyncio.get_event_loop().create_task(_clients[acc_id].stop())
+            except Exception:
+                pass
+            del _clients[acc_id]
+
     try:
         return await asyncio.wait_for(_do_check(), timeout=timeout)
     except asyncio.TimeoutError:
-        # Очищаем клиент при таймауте
-        if acc_id in _clients:
-            try:
-                if _clients[acc_id].is_connected:
-                    await _clients[acc_id].stop()
-            except Exception:
-                pass
-            del _clients[acc_id]
-        return {"ok": False, "error": f"Таймаут ({timeout} сек) — аккаунт не отвечает"}
+        _cleanup()
+        return {
+            "ok": False,
+            "dead": False,
+            "error": f"Таймаут ({timeout} сек) — нет связи с Telegram. Проверьте прокси.",
+        }
     except Exception as e:
-        # Очищаем клиент при ошибке
-        if acc_id in _clients:
-            try:
-                if _clients[acc_id].is_connected:
-                    await _clients[acc_id].stop()
-            except Exception:
-                pass
-            del _clients[acc_id]
-        return {"ok": False, "error": str(e)}
+        _cleanup()
+        err = str(e)
+        dead = _is_dead_error(err)
+        return {"ok": False, "dead": dead, "error": err}
 
 
 async def ensure_connected(acc) -> Client:
