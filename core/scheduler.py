@@ -19,6 +19,19 @@ async def _run_active_campaigns():
             logger.error(f"Ошибка кампании #{camp['id']}: {e}")
 
 
+async def _wake_up_cooldown_accounts():
+    """Возвращает аккаунты из отлёжки, если время кулдауна истекло."""
+    await execute(
+        "UPDATE accounts SET status = 'active', cooldown_until = NULL "
+        "WHERE status = 'cooldown' AND cooldown_until IS NOT NULL AND cooldown_until <= datetime('now')"
+    )
+    # Также чистим cooldown_until у active аккаунтов, у которых время прошло
+    await execute(
+        "UPDATE accounts SET cooldown_until = NULL "
+        "WHERE status = 'active' AND cooldown_until IS NOT NULL AND cooldown_until <= datetime('now')"
+    )
+
+
 async def _reset_hourly_limits():
     """Сбрасывает часовые лимиты аккаунтов."""
     await execute("UPDATE accounts SET comments_hour = 0")
@@ -32,6 +45,8 @@ async def _reset_daily_limits():
 
 
 def start_scheduler():
+    # Возвращать аккаунты из отлёжки каждые 5 минут
+    scheduler.add_job(_wake_up_cooldown_accounts, "interval", minutes=5, id="wake_cooldown")
     # Запускать кампании каждые 5 минут
     scheduler.add_job(_run_active_campaigns, "interval", minutes=5, id="campaigns")
     # Сбрасывать часовые лимиты каждый час

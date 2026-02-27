@@ -100,12 +100,18 @@ async def acc_view(callback: CallbackQuery):
     if not acc:
         await callback.answer("Аккаунт не найден", show_alert=True)
         return
-    status_icon = "🟢" if acc["status"] == "active" else "🔴"
+    status_map = {"active": "🟢", "cooldown": "🟡", "limited": "🔴", "inactive": "🔴"}
+    status_icon = status_map.get(acc["status"], "🔴")
     proxy_display = f"<code>{acc['proxy']}</code>" if acc["proxy"] else "не задан"
+
+    cooldown_line = ""
+    if acc["cooldown_until"]:
+        cooldown_line = f"\nОтлёжка до: <code>{acc['cooldown_until']}</code>"
+
     text = (
         f"📱 <b>Аккаунт #{acc['id']}</b>\n\n"
         f"Телефон: <code>{acc['phone']}</code>\n"
-        f"Статус: {status_icon} {acc['status']}\n"
+        f"Статус: {status_icon} {acc['status']}{cooldown_line}\n"
         f"Прокси: {proxy_display}\n"
         f"Комментариев сегодня: {acc['comments_today']}\n"
         f"Комментариев за час: {acc['comments_hour']}\n"

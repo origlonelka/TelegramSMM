@@ -151,7 +151,6 @@ async def import_session_file(file_path: str, api_id: int, api_hash: str,
         me = await client.get_me()
         phone = f"+{me.phone_number}" if me.phone_number else "unknown"
         await client.stop()
-        _clients[acc_id] = client
         return {"ok": True, "phone": phone}
     except Exception as e:
         # Удаляем скопированный файл если не удалось
@@ -267,7 +266,6 @@ async def import_tdata(zip_path: str, api_id: int, api_hash: str,
         me = await client.get_me()
         phone = f"+{me.phone_number}" if me.phone_number else "unknown"
         await client.stop()
-        _clients[acc_id] = client
 
         logger.info(f"[tdata] Импорт завершён для #{acc_id}: {phone}")
         return {"ok": True, "phone": phone}

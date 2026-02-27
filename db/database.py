@@ -8,21 +8,26 @@ _db: aiosqlite.Connection | None = None
 async def get_db() -> aiosqlite.Connection:
     global _db
     if _db is None:
-        _db = await aiosqlite.connect(DB_PATH)
+        _db = await aiosqlite.connect(DB_PATH, timeout=30)
         _db.row_factory = aiosqlite.Row
         await _db.execute("PRAGMA journal_mode=WAL")
         await _db.execute("PRAGMA foreign_keys=ON")
+        await _db.execute("PRAGMA busy_timeout=5000")
     return _db
 
 
 async def init_db():
     db = await get_db()
     await db.executescript(SCHEMA)
-    # Миграция: добавить proxy если его нет
-    try:
-        await db.execute("ALTER TABLE accounts ADD COLUMN proxy TEXT")
-    except Exception:
-        pass  # колонка уже существует
+    # Миграции
+    for col, sql in [
+        ("proxy", "ALTER TABLE accounts ADD COLUMN proxy TEXT"),
+        ("cooldown_until", "ALTER TABLE accounts ADD COLUMN cooldown_until TEXT"),
+    ]:
+        try:
+            await db.execute(sql)
+        except Exception:
+            pass  # колонка уже существует
     await db.commit()
 
 

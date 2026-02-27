@@ -17,12 +17,6 @@ async def run_campaign(campaign_id: int):
         return
 
     # Получаем привязанные сущности
-    accounts = await fetch_all("""
-        SELECT a.* FROM accounts a
-        JOIN campaign_accounts ca ON a.id = ca.account_id
-        WHERE ca.campaign_id = ? AND a.status = 'active'
-    """, (campaign_id,))
-
     channels = await fetch_all("""
         SELECT c.* FROM channels c
         JOIN campaign_channels cc ON c.id = cc.channel_id
@@ -35,15 +29,15 @@ async def run_campaign(campaign_id: int):
         WHERE cm.campaign_id = ? AND m.is_active = 1
     """, (campaign_id,))
 
-    if not accounts or not channels or not messages:
-        logger.warning(f"Кампания #{campaign_id}: не хватает данных (аккаунты/каналы/сообщения)")
+    if not channels or not messages:
+        logger.warning(f"Кампания #{campaign_id}: не хватает данных (каналы/сообщения)")
         return
 
     for channel in channels:
-        # Выбираем аккаунт с наименьшей нагрузкой
-        account = await _pick_account(accounts, camp)
+        # Выбираем аккаунт с наименьшей нагрузкой (свежие данные из БД)
+        account = await _pick_account(campaign_id, camp)
         if not account:
-            logger.info(f"Кампания #{campaign_id}: все аккаунты достигли лимита")
+            logger.info(f"Кампания #{campaign_id}: все аккаунты в отлёжке или достигли лимита")
             break
 
         # Выбираем случайное сообщение
@@ -57,23 +51,20 @@ async def run_campaign(campaign_id: int):
         await asyncio.sleep(delay)
 
 
-async def _pick_account(accounts: list, camp) -> dict | None:
-    """Выбирает аккаунт, который ещё не достиг лимитов."""
-    available = []
-    for acc in accounts:
-        # Проверяем дневной лимит
-        if acc["comments_today"] >= camp["daily_limit"]:
-            continue
-        # Проверяем часовой лимит
-        if acc["comments_hour"] >= camp["hourly_limit"]:
-            continue
-        available.append(acc)
+async def _pick_account(campaign_id: int, camp) -> dict | None:
+    """Выбирает аккаунт с наименьшей нагрузкой, который не в кулдауне и не достиг лимитов."""
+    accounts = await fetch_all("""
+        SELECT a.* FROM accounts a
+        JOIN campaign_accounts ca ON a.id = ca.account_id
+        WHERE ca.campaign_id = ? AND a.status = 'active'
+          AND (a.cooldown_until IS NULL OR a.cooldown_until <= datetime('now'))
+          AND a.comments_today < ?
+          AND a.comments_hour < ?
+        ORDER BY a.comments_today ASC
+        LIMIT 1
+    """, (campaign_id, camp["daily_limit"], camp["hourly_limit"]))
 
-    if not available:
-        return None
-
-    # Выбираем аккаунт с наименьшим количеством комментариев за сегодня
-    return min(available, key=lambda a: a["comments_today"])
+    return accounts[0] if accounts else None
 
 
 async def _send_comment(account, channel, message, camp):
@@ -102,6 +93,23 @@ async def _send_comment(account, channel, message, camp):
                 (account["id"],),
             )
 
+            # Проверяем лимиты — если достигнут, ставим в отлёжку
+            updated = await fetch_one("SELECT comments_today, comments_hour FROM accounts WHERE id = ?", (account["id"],))
+            if updated and updated["comments_today"] >= camp["daily_limit"]:
+                # Отлёжка до полуночи
+                await execute(
+                    "UPDATE accounts SET cooldown_until = date('now', '+1 day') WHERE id = ?",
+                    (account["id"],),
+                )
+                logger.info(f"Аккаунт #{account['id']}: достигнут дневной лимит, отлёжка до полуночи")
+            elif updated and updated["comments_hour"] >= camp["hourly_limit"]:
+                # Отлёжка на 1 час
+                await execute(
+                    "UPDATE accounts SET cooldown_until = datetime('now', '+1 hour') WHERE id = ?",
+                    (account["id"],),
+                )
+                logger.info(f"Аккаунт #{account['id']}: достигнут часовой лимит, отлёжка на 1 час")
+
             # Логируем
             await execute_returning(
                 "INSERT INTO logs (account_id, channel_id, message_id, post_id, status) "
@@ -126,13 +134,17 @@ async def _send_comment(account, channel, message, camp):
         )
 
     except FloodWait as e:
-        logger.warning(f"FloodWait: аккаунт #{account['id']}, ждём {e.value} сек")
-        await asyncio.sleep(e.value)
+        wait_minutes = max(e.value // 60, 1)
+        logger.warning(f"FloodWait: аккаунт #{account['id']}, отлёжка на {wait_minutes} мин")
+        await execute(
+            "UPDATE accounts SET cooldown_until = datetime('now', '+' || ? || ' minutes') WHERE id = ?",
+            (wait_minutes, account["id"]),
+        )
 
     except (PeerFlood, UserBannedInChannel) as e:
-        logger.error(f"Аккаунт #{account['id']} ограничен: {e}")
+        logger.error(f"Аккаунт #{account['id']} ограничен: {e}, отлёжка 24 ч")
         await execute(
-            "UPDATE accounts SET status = 'limited' WHERE id = ?",
+            "UPDATE accounts SET status = 'cooldown', cooldown_until = datetime('now', '+24 hours') WHERE id = ?",
             (account["id"],),
         )
         await execute_returning(
