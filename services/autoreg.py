@@ -85,7 +85,9 @@ async def _get_min_price(country: int = 0) -> float | None:
         def extract_prices(obj):
             if isinstance(obj, dict):
                 if "cost" in obj:
-                    prices.append(float(obj["cost"]))
+                    count = int(obj.get("count", 0))
+                    if count > 0:
+                        prices.append(float(obj["cost"]))
                 else:
                     for v in obj.values():
                         extract_prices(v)
