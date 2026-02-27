@@ -174,21 +174,11 @@ def _find_tdata_dir(base_path: str) -> str | None:
 
 def _tdata_to_session(tdata_path: str, session_path: str, api_id: int) -> None:
     """Конвертирует tdata в Pyrogram .session файл (SQLite)."""
-    from opentele.td import TDesktop
+    from services.tdata_parser import read_tdata
 
-    try:
-        tdesk = TDesktop(tdata_path)
-    except OSError as e:
-        raise ValueError(
-            f"Не удалось открыть файлы tdata: {e}. "
-            "Убедитесь, что архив содержит полную папку tdata с подпапками и ключами."
-        ) from e
-    if not tdesk.isLoaded() or not tdesk.accounts:
-        raise ValueError("Не удалось прочитать tdata — файлы повреждены или папка пуста")
-
-    account = tdesk.accounts[0]
-    auth_key = account.authKey.key  # 256 bytes
-    dc_id = account.MainDcId
+    tdata_result = read_tdata(tdata_path)
+    auth_key = tdata_result["auth_key"]  # 256 bytes
+    dc_id = tdata_result["dc_id"]
 
     session_file = f"{session_path}.session"
     conn = sqlite3.connect(session_file)
