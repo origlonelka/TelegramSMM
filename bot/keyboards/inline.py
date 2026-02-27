@@ -429,13 +429,15 @@ def autoreg_menu_kb() -> InlineKeyboardMarkup:
     ])
 
 
-def autoreg_country_kb(current_country: int) -> InlineKeyboardMarkup:
+def autoreg_country_kb(current_country: int,
+                       prices: dict[int, float] | None = None) -> InlineKeyboardMarkup:
     from services.autoreg import COUNTRIES
     buttons = []
     for code, name in COUNTRIES.items():
         check = "✅ " if code == current_country else ""
+        price_text = f" ({prices[code]:.2f}₽)" if prices and code in prices else ""
         buttons.append([InlineKeyboardButton(
-            text=f"{check}{name}",
+            text=f"{check}{name}{price_text}",
             callback_data=f"areg_setcountry_{code}"
         )])
     buttons.append([InlineKeyboardButton(

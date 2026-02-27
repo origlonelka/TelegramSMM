@@ -96,6 +96,24 @@ async def _get_min_price(country: int = 0) -> float | None:
         return None
 
 
+async def get_all_min_prices() -> dict[int, float]:
+    """Получает минимальные цены для всех стран параллельно."""
+    import asyncio
+
+    async def _fetch(code: int) -> tuple[int, float | None]:
+        price = await _get_min_price(code)
+        return code, price
+
+    results = await asyncio.gather(
+        *[_fetch(code) for code in COUNTRIES], return_exceptions=True
+    )
+    prices = {}
+    for r in results:
+        if isinstance(r, tuple) and r[1] is not None:
+            prices[r[0]] = r[1]
+    return prices
+
+
 async def _buy_number(country: int = 0) -> dict:
     min_price = await _get_min_price(country)
 

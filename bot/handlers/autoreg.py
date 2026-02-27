@@ -99,11 +99,12 @@ async def areg_set_key_value(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "areg_country")
 async def areg_country(callback: CallbackQuery):
-    from services.autoreg import get_setting
+    from services.autoreg import get_setting, get_all_min_prices
     current = int(await get_setting("autoreg_country") or "0")
+    prices = await get_all_min_prices()
     await callback.message.edit_text(
         "🌍 Выберите страну для покупки номеров:",
-        reply_markup=autoreg_country_kb(current),
+        reply_markup=autoreg_country_kb(current, prices),
     )
     await callback.answer()
 
@@ -111,14 +112,14 @@ async def areg_country(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("areg_setcountry_"))
 async def areg_setcountry(callback: CallbackQuery):
     country = int(callback.data.split("_")[2])
-    from services.autoreg import set_setting, COUNTRIES
+    from services.autoreg import set_setting, COUNTRIES, get_all_min_prices
     await set_setting("autoreg_country", str(country))
     await callback.answer(f"✅ Страна: {COUNTRIES.get(country, '?')}")
 
-    # Перерисовать
+    prices = await get_all_min_prices()
     await callback.message.edit_text(
         "🌍 Выберите страну для покупки номеров:",
-        reply_markup=autoreg_country_kb(country),
+        reply_markup=autoreg_country_kb(country, prices),
     )
 
 
