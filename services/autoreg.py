@@ -218,6 +218,21 @@ async def register_one_account(country: int = 0,
     try:
         await client.connect()
         sent_code = await client.send_code(phone)
+
+        # Проверяем тип доставки: если не SMS — пересылаем через SMS
+        code_type = type(sent_code.type).__name__
+        logger.info(f"Авторег {phone}: тип кода — {code_type}")
+        if "Sms" not in code_type:
+            try:
+                if progress_callback:
+                    await progress_callback(
+                        f"📱 {phone}\n🔄 Код отправлен через {code_type}, запрашиваю SMS...")
+                sent_code = await client.resend_code(phone, sent_code.phone_code_hash)
+                code_type = type(sent_code.type).__name__
+                logger.info(f"Авторег {phone}: повторный тип кода — {code_type}")
+            except Exception as e:
+                logger.warning(f"Авторег {phone}: resend_code не удался: {e}")
+
         phone_code_hash = sent_code.phone_code_hash
 
         # 3. Сообщаем SMS-сервису: готовы принять SMS
