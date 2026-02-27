@@ -315,34 +315,36 @@ async def check_account(acc, timeout: int = 30) -> dict:
             await client.start()
         me = await client.get_me()
         phone = f"+{me.phone_number}" if me.phone_number else None
-        await client.stop()
+        try:
+            await client.stop()
+        except Exception:
+            pass
         if acc_id in _clients:
             del _clients[acc_id]
         return {"ok": True, "phone": phone}
 
-    def _cleanup():
-        if acc_id in _clients:
-            try:
-                if _clients[acc_id].is_connected:
-                    asyncio.get_event_loop().create_task(_clients[acc_id].stop())
-            except Exception:
-                pass
-            del _clients[acc_id]
+    task = asyncio.create_task(_do_check())
+    done, _ = await asyncio.wait({task}, timeout=timeout)
 
-    try:
-        return await asyncio.wait_for(_do_check(), timeout=timeout)
-    except asyncio.TimeoutError:
-        _cleanup()
+    if done:
+        try:
+            return task.result()
+        except Exception as e:
+            if acc_id in _clients:
+                del _clients[acc_id]
+            err = str(e)
+            dead = _is_dead_error(err)
+            return {"ok": False, "dead": dead, "error": err}
+    else:
+        # Таймаут — бросаем задачу, не ждём отмены
+        task.cancel()
+        if acc_id in _clients:
+            del _clients[acc_id]
         return {
             "ok": False,
             "dead": False,
             "error": f"Таймаут ({timeout} сек) — нет связи с Telegram. Проверьте прокси.",
         }
-    except Exception as e:
-        _cleanup()
-        err = str(e)
-        dead = _is_dead_error(err)
-        return {"ok": False, "dead": dead, "error": err}
 
 
 async def ensure_connected(acc) -> Client:
