@@ -98,6 +98,25 @@ async def _send_comment(account, channel, message, camp):
             logger.warning(f"@{channel['username']} — приватный канал, пропускаю")
             return
 
+        # Подписываемся на группу обсуждений (комментарии идут туда)
+        try:
+            chat = await client.get_chat(f"@{channel['username']}")
+            if chat.linked_chat:
+                try:
+                    await client.join_chat(chat.linked_chat.id)
+                    logger.info(
+                        f"Аккаунт #{account['id']} вступил в группу обсуждений "
+                        f"канала @{channel['username']} (id={chat.linked_chat.id})"
+                    )
+                except UserAlreadyParticipant:
+                    pass
+            else:
+                logger.warning(f"@{channel['username']} не имеет группы обсуждений, пропускаю")
+                return
+        except Exception as e:
+            logger.warning(f"Не удалось получить группу обсуждений @{channel['username']}: {e}")
+            return
+
         # Получаем последний пост канала
         async for post in client.get_chat_history(f"@{channel['username']}", limit=1):
             if not post.id:
