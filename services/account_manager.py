@@ -176,7 +176,13 @@ def _tdata_to_session(tdata_path: str, session_path: str, api_id: int) -> None:
     """Конвертирует tdata в Pyrogram .session файл (SQLite)."""
     from opentele.td import TDesktop
 
-    tdesk = TDesktop(tdata_path)
+    try:
+        tdesk = TDesktop(tdata_path)
+    except OSError as e:
+        raise ValueError(
+            f"Не удалось открыть файлы tdata: {e}. "
+            "Убедитесь, что архив содержит полную папку tdata с подпапками и ключами."
+        ) from e
     if not tdesk.isLoaded() or not tdesk.accounts:
         raise ValueError("Не удалось прочитать tdata — файлы повреждены или папка пуста")
 
@@ -231,6 +237,13 @@ async def import_tdata(zip_path: str, api_id: int, api_hash: str,
         tmp_dir = tempfile.mkdtemp(prefix="tdata_")
         with zipfile.ZipFile(zip_path, "r") as zf:
             zf.extractall(tmp_dir)
+
+        # Фиксим права на файлы после распаковки (ZIP может сохранять ограничительные Unix-права)
+        for root, dirs, files in os.walk(tmp_dir):
+            for d in dirs:
+                os.chmod(os.path.join(root, d), 0o755)
+            for f in files:
+                os.chmod(os.path.join(root, f), 0o644)
 
         # 2. Ищем папку tdata
         tdata_path = _find_tdata_dir(tmp_dir)
