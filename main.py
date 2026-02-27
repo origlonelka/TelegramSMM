@@ -1,13 +1,39 @@
 import asyncio
 import logging
-from aiogram import Bot, Dispatcher
+from typing import Any, Awaitable, Callable
+from aiogram import Bot, Dispatcher, BaseMiddleware
+from aiogram.types import Message, CallbackQuery, TelegramObject
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from core.config import BOT_TOKEN
+from core.config import BOT_TOKEN, ADMIN_IDS
 from db.database import init_db, close_db
 from core.scheduler import start_scheduler
 
 from bot.handlers import start, accounts, channels, messages, campaigns, settings
+
+
+class AccessMiddleware(BaseMiddleware):
+    """Пропускает только пользователей из ADMIN_IDS."""
+
+    async def __call__(
+        self,
+        handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]],
+        event: TelegramObject,
+        data: dict[str, Any],
+    ) -> Any:
+        user = None
+        if isinstance(event, Message):
+            user = event.from_user
+        elif isinstance(event, CallbackQuery):
+            user = event.from_user
+
+        if user and user.id not in ADMIN_IDS:
+            if isinstance(event, Message):
+                await event.answer("⛔ У вас нет доступа к этому боту.")
+            elif isinstance(event, CallbackQuery):
+                await event.answer("⛔ Нет доступа", show_alert=True)
+            return
+        return await handler(event, data)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,6 +50,10 @@ async def main():
     # Создание бота
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher(storage=MemoryStorage())
+
+    # Middleware проверки доступа
+    dp.message.middleware(AccessMiddleware())
+    dp.callback_query.middleware(AccessMiddleware())
 
     # Регистрация роутеров
     dp.include_router(start.router)

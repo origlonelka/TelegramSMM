@@ -1,3 +1,4 @@
+import os
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
@@ -5,14 +6,39 @@ from aiogram.fsm.state import State, StatesGroup
 from db.database import execute, execute_returning, fetch_all, fetch_one
 from bot.keyboards.inline import (
     accounts_menu_kb, account_list_kb, account_item_kb,
-    acc_confirm_del_kb, back_kb,
+    acc_confirm_del_kb, acc_add_method_kb, back_kb,
 )
 
 router = Router()
 
 
+# --- FSM States ---
+
 class AddAccount(StatesGroup):
+    """Полное добавление: телефон + api_id + api_hash + прокси."""
     phone = State()
+    api_id = State()
+    api_hash = State()
+    proxy = State()
+
+
+class AddQuick(StatesGroup):
+    """Быстрое добавление: только телефон + прокси (API из .env)."""
+    phone = State()
+    proxy = State()
+
+
+class AddSession(StatesGroup):
+    """Импорт через session string."""
+    session_string = State()
+    api_id = State()
+    api_hash = State()
+    proxy = State()
+
+
+class AddSessionFile(StatesGroup):
+    """Импорт через .session файл."""
+    file = State()
     api_id = State()
     api_hash = State()
     proxy = State()
@@ -20,6 +46,10 @@ class AddAccount(StatesGroup):
 
 class AuthAccount(StatesGroup):
     code = State()
+
+
+class Auth2FA(StatesGroup):
+    password = State()
 
 
 class EditProxy(StatesGroup):
@@ -77,10 +107,31 @@ async def acc_view(callback: CallbackQuery):
     await callback.answer()
 
 
-# --- Добавление ---
+# ============================================================
+# ДОБАВЛЕНИЕ АККАУНТОВ — выбор способа
+# ============================================================
 
 @router.callback_query(F.data == "acc_add")
 async def acc_add_start(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.message.edit_text(
+        "📱 <b>Выберите способ добавления аккаунта:</b>\n\n"
+        "• <b>Телефон + SMS</b> — ввести телефон, API ID, API Hash\n"
+        "• <b>Быстрое</b> — только телефон (API из .env)\n"
+        "• <b>Session string</b> — вставить строку сессии\n"
+        "• <b>Session файл</b> — отправить .session файл",
+        reply_markup=acc_add_method_kb(),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+# ============================================================
+# Способ 1: Телефон + API ID + API Hash + SMS
+# ============================================================
+
+@router.callback_query(F.data == "acc_add_phone")
+async def acc_add_phone_start(callback: CallbackQuery, state: FSMContext):
     await state.set_state(AddAccount.phone)
     await callback.message.edit_text(
         "📱 Введите номер телефона (в формате +79001234567):",
@@ -125,8 +176,7 @@ async def acc_add_api_hash(message: Message, state: FSMContext):
         "🌐 Введите прокси (необязательно):\n\n"
         "Форматы:\n"
         "<code>socks5://user:pass@host:port</code>\n"
-        "<code>http://host:port</code>\n"
-        "<code>socks5://host:port</code>\n\n"
+        "<code>http://host:port</code>\n\n"
         "Или отправьте <b>-</b> чтобы пропустить.",
         parse_mode="HTML",
     )
@@ -151,7 +201,292 @@ async def acc_add_proxy(message: Message, state: FSMContext):
     )
 
 
-# --- Удаление ---
+# ============================================================
+# Способ 2: Быстрое добавление (API из .env)
+# ============================================================
+
+@router.callback_query(F.data == "acc_add_quick")
+async def acc_add_quick_start(callback: CallbackQuery, state: FSMContext):
+    from core.config import API_ID, API_HASH
+    if not API_ID or not API_HASH:
+        await callback.answer(
+            "❌ API_ID и API_HASH не заданы в .env",
+            show_alert=True,
+        )
+        return
+    await state.set_state(AddQuick.phone)
+    await callback.message.edit_text(
+        "⚡ <b>Быстрое добавление</b>\n\n"
+        "API ID и API Hash будут взяты из .env.\n\n"
+        "📱 Введите номер телефона (в формате +79001234567):",
+        reply_markup=back_kb("accounts"),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(AddQuick.phone)
+async def acc_quick_phone(message: Message, state: FSMContext):
+    phone = message.text.strip()
+    if not phone.startswith("+") or not phone[1:].isdigit():
+        await message.answer("❌ Неверный формат. Введите номер в формате +79001234567:")
+        return
+    existing = await fetch_one("SELECT id FROM accounts WHERE phone = ?", (phone,))
+    if existing:
+        await message.answer("❌ Аккаунт с таким номером уже существует.")
+        await state.clear()
+        return
+    await state.update_data(phone=phone)
+    await state.set_state(AddQuick.proxy)
+    await message.answer(
+        "🌐 Введите прокси или <b>-</b> чтобы пропустить:",
+        parse_mode="HTML",
+    )
+
+
+@router.message(AddQuick.proxy)
+async def acc_quick_proxy(message: Message, state: FSMContext):
+    from core.config import API_ID, API_HASH
+    proxy_text = message.text.strip()
+    proxy = None if proxy_text == "-" else proxy_text
+    data = await state.get_data()
+    await state.clear()
+
+    acc_id = await execute_returning(
+        "INSERT INTO accounts (phone, api_id, api_hash, proxy) VALUES (?, ?, ?, ?)",
+        (data["phone"], API_ID, API_HASH, proxy),
+    )
+    await message.answer(
+        f"✅ Аккаунт <code>{data['phone']}</code> добавлен (#{acc_id}).\n\n"
+        f"Теперь авторизуйте его через меню аккаунта.",
+        reply_markup=account_item_kb(acc_id),
+        parse_mode="HTML",
+    )
+
+
+# ============================================================
+# Способ 3: Session string
+# ============================================================
+
+@router.callback_query(F.data == "acc_add_session")
+async def acc_add_session_start(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(AddSession.session_string)
+    await callback.message.edit_text(
+        "📋 <b>Импорт через Session String</b>\n\n"
+        "Вставьте строку сессии Pyrogram:\n"
+        "(получить можно через <code>client.export_session_string()</code>)",
+        reply_markup=back_kb("accounts"),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(AddSession.session_string)
+async def acc_session_string(message: Message, state: FSMContext):
+    session_str = message.text.strip()
+    if len(session_str) < 50:
+        await message.answer("❌ Слишком короткая строка. Проверьте и попробуйте снова:")
+        return
+    await state.update_data(session_string=session_str)
+
+    from core.config import API_ID, API_HASH
+    if API_ID and API_HASH:
+        # API есть в .env — предложим использовать их
+        await state.update_data(api_id=API_ID, api_hash=API_HASH)
+        await state.set_state(AddSession.proxy)
+        await message.answer(
+            f"🔑 API ID/Hash будут взяты из .env.\n\n"
+            f"🌐 Введите прокси или <b>-</b> чтобы пропустить:",
+            parse_mode="HTML",
+        )
+    else:
+        await state.set_state(AddSession.api_id)
+        await message.answer("🔑 Введите API ID:")
+
+
+@router.message(AddSession.api_id)
+async def acc_session_api_id(message: Message, state: FSMContext):
+    if not message.text.strip().isdigit():
+        await message.answer("❌ API ID должен быть числом:")
+        return
+    await state.update_data(api_id=int(message.text.strip()))
+    await state.set_state(AddSession.api_hash)
+    await message.answer("🔑 Введите API Hash:")
+
+
+@router.message(AddSession.api_hash)
+async def acc_session_api_hash(message: Message, state: FSMContext):
+    await state.update_data(api_hash=message.text.strip())
+    await state.set_state(AddSession.proxy)
+    await message.answer(
+        "🌐 Введите прокси или <b>-</b> чтобы пропустить:",
+        parse_mode="HTML",
+    )
+
+
+@router.message(AddSession.proxy)
+async def acc_session_proxy(message: Message, state: FSMContext):
+    proxy_text = message.text.strip()
+    proxy = None if proxy_text == "-" else proxy_text
+    data = await state.get_data()
+    await state.clear()
+
+    # Сначала создаём запись чтобы получить id для файла сессии
+    acc_id = await execute_returning(
+        "INSERT INTO accounts (phone, api_id, api_hash, proxy, status) VALUES (?, ?, ?, ?, 'importing')",
+        ("importing...", data["api_id"], data["api_hash"], proxy),
+    )
+
+    await message.answer("⏳ Импортирую сессию...")
+
+    from services.account_manager import import_session_string
+    result = await import_session_string(
+        session_string=data["session_string"],
+        api_id=data["api_id"],
+        api_hash=data["api_hash"],
+        acc_id=acc_id,
+        proxy_str=proxy,
+    )
+
+    if not result["ok"]:
+        await execute("DELETE FROM accounts WHERE id = ?", (acc_id,))
+        await message.answer(
+            f"❌ Ошибка импорта: {result['error']}",
+            reply_markup=acc_add_method_kb(),
+        )
+        return
+
+    phone = result["phone"]
+    await execute(
+        "UPDATE accounts SET phone = ?, status = 'active' WHERE id = ?",
+        (phone, acc_id),
+    )
+    await message.answer(
+        f"✅ Аккаунт <code>{phone}</code> импортирован и активен (#{acc_id})!",
+        reply_markup=account_item_kb(acc_id),
+        parse_mode="HTML",
+    )
+
+
+# ============================================================
+# Способ 4: Session файл (.session)
+# ============================================================
+
+@router.callback_query(F.data == "acc_add_file")
+async def acc_add_file_start(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(AddSessionFile.file)
+    await callback.message.edit_text(
+        "📁 <b>Импорт .session файла</b>\n\n"
+        "Отправьте файл сессии Pyrogram (.session).\n"
+        "Файл будет скопирован в папку sessions/.",
+        reply_markup=back_kb("accounts"),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(AddSessionFile.file, F.document)
+async def acc_file_received(message: Message, state: FSMContext):
+    doc = message.document
+    if not doc.file_name.endswith(".session"):
+        await message.answer("❌ Нужен файл с расширением .session. Попробуйте снова:")
+        return
+
+    # Скачиваем файл во временную директорию
+    tmp_path = f"/tmp/tg_session_{doc.file_id}.session"
+    await message.bot.download(doc.file_id, destination=tmp_path)
+    await state.update_data(file_path=tmp_path)
+
+    from core.config import API_ID, API_HASH
+    if API_ID and API_HASH:
+        await state.update_data(api_id=API_ID, api_hash=API_HASH)
+        await state.set_state(AddSessionFile.proxy)
+        await message.answer(
+            "🔑 API ID/Hash будут взяты из .env.\n\n"
+            "🌐 Введите прокси или <b>-</b> чтобы пропустить:",
+            parse_mode="HTML",
+        )
+    else:
+        await state.set_state(AddSessionFile.api_id)
+        await message.answer("🔑 Введите API ID:")
+
+
+@router.message(AddSessionFile.file)
+async def acc_file_not_document(message: Message, state: FSMContext):
+    await message.answer("❌ Отправьте файл (.session), а не текст.")
+
+
+@router.message(AddSessionFile.api_id)
+async def acc_file_api_id(message: Message, state: FSMContext):
+    if not message.text.strip().isdigit():
+        await message.answer("❌ API ID должен быть числом:")
+        return
+    await state.update_data(api_id=int(message.text.strip()))
+    await state.set_state(AddSessionFile.api_hash)
+    await message.answer("🔑 Введите API Hash:")
+
+
+@router.message(AddSessionFile.api_hash)
+async def acc_file_api_hash(message: Message, state: FSMContext):
+    await state.update_data(api_hash=message.text.strip())
+    await state.set_state(AddSessionFile.proxy)
+    await message.answer(
+        "🌐 Введите прокси или <b>-</b> чтобы пропустить:",
+        parse_mode="HTML",
+    )
+
+
+@router.message(AddSessionFile.proxy)
+async def acc_file_proxy(message: Message, state: FSMContext):
+    proxy_text = message.text.strip()
+    proxy = None if proxy_text == "-" else proxy_text
+    data = await state.get_data()
+    await state.clear()
+
+    acc_id = await execute_returning(
+        "INSERT INTO accounts (phone, api_id, api_hash, proxy, status) VALUES (?, ?, ?, ?, 'importing')",
+        ("importing...", data["api_id"], data["api_hash"], proxy),
+    )
+
+    await message.answer("⏳ Импортирую сессию из файла...")
+
+    from services.account_manager import import_session_file
+    result = await import_session_file(
+        file_path=data["file_path"],
+        api_id=data["api_id"],
+        api_hash=data["api_hash"],
+        acc_id=acc_id,
+        proxy_str=proxy,
+    )
+
+    # Удаляем временный файл
+    tmp_path = data.get("file_path")
+    if tmp_path and os.path.exists(tmp_path):
+        os.remove(tmp_path)
+
+    if not result["ok"]:
+        await execute("DELETE FROM accounts WHERE id = ?", (acc_id,))
+        await message.answer(
+            f"❌ Ошибка импорта: {result['error']}",
+            reply_markup=acc_add_method_kb(),
+        )
+        return
+
+    phone = result["phone"]
+    await execute(
+        "UPDATE accounts SET phone = ?, status = 'active' WHERE id = ?",
+        (phone, acc_id),
+    )
+    await message.answer(
+        f"✅ Аккаунт <code>{phone}</code> импортирован и активен (#{acc_id})!",
+        reply_markup=account_item_kb(acc_id),
+        parse_mode="HTML",
+    )
+
+
+# ============================================================
+# Удаление
+# ============================================================
 
 @router.callback_query(F.data.startswith("acc_del_confirm_"))
 async def acc_del_confirm(callback: CallbackQuery):
@@ -176,7 +511,9 @@ async def acc_del(callback: CallbackQuery):
     await callback.answer()
 
 
-# --- Авторизация ---
+# ============================================================
+# Авторизация: SMS код + 2FA пароль
+# ============================================================
 
 @router.callback_query(F.data.startswith("acc_auth_"))
 async def acc_auth_start(callback: CallbackQuery, state: FSMContext):
@@ -215,6 +552,17 @@ async def acc_auth_code(message: Message, state: FSMContext):
     from services.account_manager import sign_in
     acc = await fetch_one("SELECT * FROM accounts WHERE id = ?", (acc_id,))
     result = await sign_in(acc, code, data["phone_code_hash"])
+
+    if result.get("need_2fa"):
+        # Аккаунт с двухфакторной аутентификацией
+        await state.set_state(Auth2FA.password)
+        await state.update_data(acc_id=acc_id)
+        await message.answer(
+            "🔐 Аккаунт защищён двухфакторной аутентификацией.\n"
+            "Введите пароль 2FA:",
+        )
+        return
+
     await state.clear()
 
     if not result["ok"]:
@@ -231,7 +579,34 @@ async def acc_auth_code(message: Message, state: FSMContext):
     )
 
 
-# --- Редактирование прокси ---
+@router.message(Auth2FA.password)
+async def acc_auth_2fa(message: Message, state: FSMContext):
+    data = await state.get_data()
+    acc_id = data["acc_id"]
+    password = message.text.strip()
+    await state.clear()
+
+    from services.account_manager import sign_in_2fa
+    acc = await fetch_one("SELECT * FROM accounts WHERE id = ?", (acc_id,))
+    result = await sign_in_2fa(acc, password)
+
+    if not result["ok"]:
+        await message.answer(
+            f"❌ Ошибка 2FA: {result['error']}",
+            reply_markup=account_item_kb(acc_id),
+        )
+        return
+
+    await execute("UPDATE accounts SET status = 'active' WHERE id = ?", (acc_id,))
+    await message.answer(
+        f"✅ Аккаунт успешно авторизован (2FA)!",
+        reply_markup=account_item_kb(acc_id),
+    )
+
+
+# ============================================================
+# Редактирование прокси
+# ============================================================
 
 @router.callback_query(F.data.startswith("acc_proxy_"))
 async def acc_proxy_edit(callback: CallbackQuery, state: FSMContext):
@@ -242,8 +617,7 @@ async def acc_proxy_edit(callback: CallbackQuery, state: FSMContext):
         "🌐 Введите новый прокси:\n\n"
         "Форматы:\n"
         "<code>socks5://user:pass@host:port</code>\n"
-        "<code>http://host:port</code>\n"
-        "<code>socks5://host:port</code>\n\n"
+        "<code>http://host:port</code>\n\n"
         "Или отправьте <b>-</b> чтобы убрать прокси.",
         parse_mode="HTML",
     )

@@ -28,6 +28,16 @@ def accounts_menu_kb() -> InlineKeyboardMarkup:
     ])
 
 
+def acc_add_method_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📱 Телефон + SMS", callback_data="acc_add_phone")],
+        [InlineKeyboardButton(text="⚡ Быстрое (API из .env)", callback_data="acc_add_quick")],
+        [InlineKeyboardButton(text="📋 Session string", callback_data="acc_add_session")],
+        [InlineKeyboardButton(text="📁 Session файл (.session)", callback_data="acc_add_file")],
+        [InlineKeyboardButton(text="◀️ К аккаунтам", callback_data="accounts")],
+    ])
+
+
 def account_item_kb(acc_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔑 Авторизовать", callback_data=f"acc_auth_{acc_id}"),

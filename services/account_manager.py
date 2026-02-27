@@ -1,5 +1,7 @@
 import os
+import shutil
 from pyrogram import Client
+from pyrogram.errors import SessionPasswordNeeded
 from core.config import SESSIONS_DIR
 
 os.makedirs(SESSIONS_DIR, exist_ok=True)
@@ -86,7 +88,69 @@ async def sign_in(acc, code: str, phone_code_hash: str) -> dict:
         await client.sign_in(acc["phone"], phone_code_hash, code)
         await client.disconnect()
         return {"ok": True}
+    except SessionPasswordNeeded:
+        return {"ok": False, "need_2fa": True}
     except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+async def sign_in_2fa(acc, password: str) -> dict:
+    """Завершает авторизацию с двухфакторным паролем."""
+    try:
+        client = get_client(acc)
+        await client.check_password(password)
+        await client.disconnect()
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+async def import_session_string(session_string: str, api_id: int, api_hash: str,
+                                 acc_id: int, proxy_str: str | None = None) -> dict:
+    """Импортирует аккаунт из session string."""
+    try:
+        proxy = _parse_proxy(proxy_str)
+        client = Client(
+            name=_get_session_path(acc_id),
+            api_id=api_id,
+            api_hash=api_hash,
+            session_string=session_string,
+            proxy=proxy,
+        )
+        await client.start()
+        me = await client.get_me()
+        phone = f"+{me.phone_number}" if me.phone_number else "unknown"
+        await client.stop()
+        return {"ok": True, "phone": phone}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+async def import_session_file(file_path: str, api_id: int, api_hash: str,
+                               acc_id: int, proxy_str: str | None = None) -> dict:
+    """Импортирует аккаунт из .session файла."""
+    try:
+        dest = _get_session_path(acc_id) + ".session"
+        shutil.copy2(file_path, dest)
+
+        proxy = _parse_proxy(proxy_str)
+        client = Client(
+            name=_get_session_path(acc_id),
+            api_id=api_id,
+            api_hash=api_hash,
+            proxy=proxy,
+        )
+        await client.start()
+        me = await client.get_me()
+        phone = f"+{me.phone_number}" if me.phone_number else "unknown"
+        await client.stop()
+        _clients[acc_id] = client
+        return {"ok": True, "phone": phone}
+    except Exception as e:
+        # Удаляем скопированный файл если не удалось
+        dest = _get_session_path(acc_id) + ".session"
+        if os.path.exists(dest):
+            os.remove(dest)
         return {"ok": False, "error": str(e)}
 
 
