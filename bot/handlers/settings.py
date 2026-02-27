@@ -1,5 +1,6 @@
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
+from aiogram.exceptions import TelegramBadRequest
 from db.database import execute, fetch_one, fetch_all
 from bot.keyboards.inline import settings_menu_kb, stats_kb, back_kb
 
@@ -85,5 +86,8 @@ async def stats(callback: CallbackQuery):
         f"Всего отправлено: {total_sent['cnt']}\n"
         f"Ошибок: {total_errors['cnt']}"
     )
-    await callback.message.edit_text(text, reply_markup=stats_kb(), parse_mode="HTML")
+    try:
+        await callback.message.edit_text(text, reply_markup=stats_kb(), parse_mode="HTML")
+    except TelegramBadRequest:
+        pass
     await callback.answer()
