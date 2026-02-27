@@ -5,6 +5,7 @@ import logging
 import aiohttp
 
 from pyrogram import Client
+from pyrogram.enums import SentCodeType
 from pyrogram.errors import (
     SessionPasswordNeeded, FloodWait, PhoneNumberBanned,
     PhoneNumberInvalid,
@@ -244,19 +245,20 @@ async def register_one_account(country: int = 0,
         sent_code = await client.send_code(phone)
 
         # Проверяем тип доставки: если не SMS — пересылаем через SMS
-        code_type = type(sent_code.type).__name__
+        _SMS_TYPES = {SentCodeType.SMS, SentCodeType.FRAGMENT_SMS}
+        code_type = sent_code.type
         logger.info(f"Авторег {phone}: тип кода — {code_type}")
-        sms_delivery = "Sms" in code_type
+        sms_delivery = code_type in _SMS_TYPES
 
         if not sms_delivery:
             try:
                 if progress_callback:
                     await progress_callback(
-                        f"📱 {phone}\n🔄 Код отправлен через {code_type}, запрашиваю SMS...")
+                        f"📱 {phone}\n🔄 Код отправлен через {code_type.name}, запрашиваю SMS...")
                 sent_code = await client.resend_code(phone, sent_code.phone_code_hash)
-                code_type = type(sent_code.type).__name__
+                code_type = sent_code.type
                 logger.info(f"Авторег {phone}: повторный тип кода — {code_type}")
-                sms_delivery = "Sms" in code_type
+                sms_delivery = code_type in _SMS_TYPES
             except Exception as e:
                 logger.warning(f"Авторег {phone}: resend_code не удался: {e}")
 
@@ -268,7 +270,7 @@ async def register_one_account(country: int = 0,
             except Exception:
                 pass
             await _cleanup_account(acc_id, session_path)
-            return {"ok": False, "error": f"{phone} — Telegram отправил код через {code_type}, а не SMS"}
+            return {"ok": False, "error": f"{phone} — Telegram отправил код через {code_type.name}, а не SMS"}
 
         phone_code_hash = sent_code.phone_code_hash
 
