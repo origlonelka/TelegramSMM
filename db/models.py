@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE TABLE IF NOT EXISTS campaigns (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
+    mode TEXT DEFAULT 'comments',
     is_active INTEGER DEFAULT 0,
     delay_min INTEGER DEFAULT 60,
     delay_max INTEGER DEFAULT 300,
@@ -61,6 +62,16 @@ CREATE TABLE IF NOT EXISTS campaign_messages (
     PRIMARY KEY (campaign_id, message_id),
     FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE,
     FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS account_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    first_name TEXT,
+    last_name TEXT,
+    bio TEXT,
+    photo_path TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS logs (

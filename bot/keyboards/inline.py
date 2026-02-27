@@ -25,6 +25,7 @@ def accounts_menu_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="➕ Добавить аккаунт", callback_data="acc_add")],
         [InlineKeyboardButton(text="📋 Список аккаунтов", callback_data="acc_list")],
         [InlineKeyboardButton(text="🔍 Проверить все", callback_data="acc_check_all")],
+        [InlineKeyboardButton(text="👤 Шаблоны профиля", callback_data="acc_setup")],
         [InlineKeyboardButton(text="◀️ Главное меню", callback_data="back_main")],
     ])
 
@@ -182,6 +183,7 @@ def campaign_item_kb(camp_id: int, is_active: bool) -> InlineKeyboardMarkup:
     toggle_text = "⏸ Остановить" if is_active else "▶️ Запустить"
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=toggle_text, callback_data=f"camp_toggle_{camp_id}")],
+        [InlineKeyboardButton(text="🎯 Режим", callback_data=f"camp_mode_{camp_id}")],
         [InlineKeyboardButton(text="📢 Каналы", callback_data=f"camp_channels_{camp_id}"),
          InlineKeyboardButton(text="📱 Аккаунты", callback_data=f"camp_accounts_{camp_id}")],
         [InlineKeyboardButton(text="💬 Сообщения", callback_data=f"camp_messages_{camp_id}"),
@@ -220,6 +222,81 @@ def camp_limits_kb(camp_id: int) -> InlineKeyboardMarkup:
          InlineKeyboardButton(text="📅 Лимит/день", callback_data=f"camp_set_daily_{camp_id}")],
         [InlineKeyboardButton(text="◀️ К кампании", callback_data=f"camp_view_{camp_id}")],
     ])
+
+
+MODE_LABELS = {
+    "comments": "💬 Комментарии",
+    "comments_cta": "💬 Комментарии + CTA",
+    "stories": "👁 Просмотр Stories",
+    "subscribe": "📢 Подписка + просмотр",
+}
+
+
+def camp_mode_kb(camp_id: int, current_mode: str) -> InlineKeyboardMarkup:
+    buttons = []
+    for mode, label in MODE_LABELS.items():
+        check = "✅ " if mode == current_mode else ""
+        buttons.append([InlineKeyboardButton(
+            text=f"{check}{label}",
+            callback_data=f"camp_setmode_{camp_id}_{mode}"
+        )])
+    buttons.append([InlineKeyboardButton(
+        text="◀️ К кампании", callback_data=f"camp_view_{camp_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+# --- Шаблоны профиля ---
+
+def acc_setup_menu_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Создать шаблон", callback_data="tpl_add")],
+        [InlineKeyboardButton(text="📋 Список шаблонов", callback_data="tpl_list")],
+        [InlineKeyboardButton(text="◀️ К аккаунтам", callback_data="accounts")],
+    ])
+
+
+def tpl_list_kb(templates: list) -> InlineKeyboardMarkup:
+    buttons = []
+    for tpl in templates:
+        buttons.append([InlineKeyboardButton(
+            text=f"👤 {tpl['name']}",
+            callback_data=f"tpl_view_{tpl['id']}"
+        )])
+    buttons.append([InlineKeyboardButton(text="◀️ К шаблонам", callback_data="acc_setup")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def tpl_item_kb(tpl_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="🔄 Применить ко всем", callback_data=f"tpl_apply_all_{tpl_id}")],
+        [InlineKeyboardButton(
+            text="📱 Применить к одному", callback_data=f"tpl_apply_pick_{tpl_id}")],
+        [InlineKeyboardButton(
+            text="🗑 Удалить", callback_data=f"tpl_del_{tpl_id}")],
+        [InlineKeyboardButton(text="◀️ К шаблонам", callback_data="acc_setup")],
+    ])
+
+
+def tpl_confirm_del_kb(tpl_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="✅ Да, удалить", callback_data=f"tpl_del_confirm_{tpl_id}"),
+         InlineKeyboardButton(
+            text="❌ Отмена", callback_data=f"tpl_view_{tpl_id}")],
+    ])
+
+
+def tpl_select_acc_kb(accounts: list, tpl_id: int) -> InlineKeyboardMarkup:
+    buttons = []
+    for acc in accounts:
+        buttons.append([InlineKeyboardButton(
+            text=f"📱 {acc['phone']}",
+            callback_data=f"tpl_apply_{tpl_id}_{acc['id']}"
+        )])
+    buttons.append([InlineKeyboardButton(
+        text="◀️ Назад", callback_data=f"tpl_view_{tpl_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 # --- Настройки ---

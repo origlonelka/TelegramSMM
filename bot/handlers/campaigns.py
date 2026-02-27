@@ -6,6 +6,7 @@ from db.database import execute, execute_returning, fetch_all, fetch_one
 from bot.keyboards.inline import (
     campaigns_menu_kb, campaign_list_kb, campaign_item_kb,
     camp_confirm_del_kb, camp_select_items_kb, camp_limits_kb, back_kb,
+    camp_mode_kb, MODE_LABELS,
 )
 
 router = Router()
@@ -64,9 +65,12 @@ async def camp_view(callback: CallbackQuery):
         "SELECT COUNT(*) as cnt FROM campaign_messages WHERE campaign_id = ?", (camp_id,))
 
     status = "🟢 Активна" if camp["is_active"] else "🔴 Остановлена"
+    mode = camp["mode"] or "comments"
+    mode_label = MODE_LABELS.get(mode, mode)
     text = (
         f"🚀 <b>Кампания: {camp['name']}</b>\n\n"
         f"Статус: {status}\n"
+        f"Режим: {mode_label}\n"
         f"Каналов: {ch_count['cnt']}\n"
         f"Аккаунтов: {acc_count['cnt']}\n"
         f"Сообщений: {msg_count['cnt']}\n\n"
@@ -128,9 +132,12 @@ async def camp_toggle(callback: CallbackQuery):
     msg_count = await fetch_one(
         "SELECT COUNT(*) as cnt FROM campaign_messages WHERE campaign_id = ?", (camp_id,))
     status = "🟢 Активна" if camp["is_active"] else "🔴 Остановлена"
+    mode = camp["mode"] or "comments"
+    mode_label = MODE_LABELS.get(mode, mode)
     text = (
         f"🚀 <b>Кампания: {camp['name']}</b>\n\n"
         f"Статус: {status}\n"
+        f"Режим: {mode_label}\n"
         f"Каналов: {ch_count['cnt']}\n"
         f"Аккаунтов: {acc_count['cnt']}\n"
         f"Сообщений: {msg_count['cnt']}\n\n"
@@ -141,6 +148,52 @@ async def camp_toggle(callback: CallbackQuery):
     )
     await callback.message.edit_text(
         text, reply_markup=campaign_item_kb(camp_id, bool(camp["is_active"])),
+        parse_mode="HTML",
+    )
+
+
+# --- Режим кампании ---
+
+@router.callback_query(F.data.startswith("camp_mode_"))
+async def camp_mode(callback: CallbackQuery):
+    camp_id = int(callback.data.split("_")[2])
+    camp = await fetch_one("SELECT * FROM campaigns WHERE id = ?", (camp_id,))
+    if not camp:
+        await callback.answer("Кампания не найдена", show_alert=True)
+        return
+    current_mode = camp["mode"] or "comments"
+    await callback.message.edit_text(
+        f"🎯 <b>Режим кампании «{camp['name']}»</b>\n\n"
+        f"Текущий: {MODE_LABELS.get(current_mode, current_mode)}\n\n"
+        f"💬 <b>Комментарии</b> — оставляет комментарии под постами\n"
+        f"💬 <b>Комментарии + CTA</b> — комментарии с мягкой рекламой\n"
+        f"👁 <b>Просмотр Stories</b> — просматривает Stories каналов\n"
+        f"📢 <b>Подписка + просмотр</b> — подписка на каналы и просмотр постов",
+        reply_markup=camp_mode_kb(camp_id, current_mode),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("camp_setmode_"))
+async def camp_setmode(callback: CallbackQuery):
+    parts = callback.data.split("_")
+    camp_id = int(parts[2])
+    mode = "_".join(parts[3:])  # comments, comments_cta, stories, subscribe
+
+    await execute("UPDATE campaigns SET mode = ? WHERE id = ?", (mode, camp_id))
+    await callback.answer(f"✅ Режим: {MODE_LABELS.get(mode, mode)}")
+
+    camp = await fetch_one("SELECT * FROM campaigns WHERE id = ?", (camp_id,))
+    current_mode = camp["mode"] or "comments"
+    await callback.message.edit_text(
+        f"🎯 <b>Режим кампании «{camp['name']}»</b>\n\n"
+        f"Текущий: {MODE_LABELS.get(current_mode, current_mode)}\n\n"
+        f"💬 <b>Комментарии</b> — оставляет комментарии под постами\n"
+        f"💬 <b>Комментарии + CTA</b> — комментарии с мягкой рекламой\n"
+        f"👁 <b>Просмотр Stories</b> — просматривает Stories каналов\n"
+        f"📢 <b>Подписка + просмотр</b> — подписка на каналы и просмотр постов",
+        reply_markup=camp_mode_kb(camp_id, current_mode),
         parse_mode="HTML",
     )
 

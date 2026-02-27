@@ -19,11 +19,15 @@ async def get_db() -> aiosqlite.Connection:
 async def init_db():
     db = await get_db()
     await db.executescript(SCHEMA)
-    # Миграция: добавить proxy если его нет
-    try:
-        await db.execute("ALTER TABLE accounts ADD COLUMN proxy TEXT")
-    except Exception:
-        pass  # колонка уже существует
+    # Миграции
+    for migration in [
+        "ALTER TABLE accounts ADD COLUMN proxy TEXT",
+        "ALTER TABLE campaigns ADD COLUMN mode TEXT DEFAULT 'comments'",
+    ]:
+        try:
+            await db.execute(migration)
+        except Exception:
+            pass  # колонка уже существует
     await db.commit()
 
 
