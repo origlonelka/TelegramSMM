@@ -34,6 +34,7 @@ def acc_add_method_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="⚡ Быстрое (API из .env)", callback_data="acc_add_quick")],
         [InlineKeyboardButton(text="📋 Session string", callback_data="acc_add_session")],
         [InlineKeyboardButton(text="📁 Session файл (.session)", callback_data="acc_add_file")],
+        [InlineKeyboardButton(text="📂 Tdata (ZIP архив)", callback_data="acc_add_tdata")],
         [InlineKeyboardButton(text="◀️ К аккаунтам", callback_data="accounts")],
     ])
 

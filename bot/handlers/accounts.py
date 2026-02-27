@@ -44,6 +44,14 @@ class AddSessionFile(StatesGroup):
     proxy = State()
 
 
+class AddTdata(StatesGroup):
+    """Импорт через tdata (ZIP архив)."""
+    file = State()
+    api_id = State()
+    api_hash = State()
+    proxy = State()
+
+
 class AuthAccount(StatesGroup):
     code = State()
 
@@ -119,7 +127,8 @@ async def acc_add_start(callback: CallbackQuery, state: FSMContext):
         "• <b>Телефон + SMS</b> — ввести телефон, API ID, API Hash\n"
         "• <b>Быстрое</b> — только телефон (API из .env)\n"
         "• <b>Session string</b> — вставить строку сессии\n"
-        "• <b>Session файл</b> — отправить .session файл",
+        "• <b>Session файл</b> — отправить .session файл\n"
+        "• <b>Tdata</b> — ZIP архив с папкой tdata",
         reply_markup=acc_add_method_kb(),
         parse_mode="HTML",
     )
@@ -479,6 +488,125 @@ async def acc_file_proxy(message: Message, state: FSMContext):
     )
     await message.answer(
         f"✅ Аккаунт <code>{phone}</code> импортирован и активен (#{acc_id})!",
+        reply_markup=account_item_kb(acc_id),
+        parse_mode="HTML",
+    )
+
+
+# ============================================================
+# Способ 5: Tdata (ZIP архив)
+# ============================================================
+
+@router.callback_query(F.data == "acc_add_tdata")
+async def acc_add_tdata_start(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(AddTdata.file)
+    await callback.message.edit_text(
+        "📂 <b>Импорт через tdata</b>\n\n"
+        "Заархивируйте папку <code>tdata</code> в ZIP и отправьте сюда.\n\n"
+        "Папка tdata находится:\n"
+        "• Windows: <code>%APPDATA%/Telegram Desktop/tdata</code>\n"
+        "• Linux: <code>~/.local/share/TelegramDesktop/tdata</code>\n"
+        "• macOS: <code>~/Library/Application Support/Telegram Desktop/tdata</code>",
+        reply_markup=back_kb("accounts"),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(AddTdata.file, F.document)
+async def acc_tdata_received(message: Message, state: FSMContext):
+    doc = message.document
+    if not doc.file_name.lower().endswith(".zip"):
+        await message.answer("❌ Нужен ZIP-архив. Заархивируйте папку tdata и отправьте снова:")
+        return
+
+    await message.answer("⏳ Скачиваю архив...")
+    tmp_path = f"/tmp/tdata_{doc.file_id}.zip"
+    await message.bot.download(doc.file_id, destination=tmp_path)
+    await state.update_data(zip_path=tmp_path)
+
+    from core.config import API_ID, API_HASH
+    if API_ID and API_HASH:
+        await state.update_data(api_id=API_ID, api_hash=API_HASH)
+        await state.set_state(AddTdata.proxy)
+        await message.answer(
+            "🔑 API ID/Hash будут взяты из .env.\n\n"
+            "🌐 Введите прокси или <b>-</b> чтобы пропустить:",
+            parse_mode="HTML",
+        )
+    else:
+        await state.set_state(AddTdata.api_id)
+        await message.answer("🔑 Введите API ID:")
+
+
+@router.message(AddTdata.file)
+async def acc_tdata_not_document(message: Message, state: FSMContext):
+    await message.answer("❌ Отправьте ZIP-архив с папкой tdata, а не текст.")
+
+
+@router.message(AddTdata.api_id)
+async def acc_tdata_api_id(message: Message, state: FSMContext):
+    if not message.text.strip().isdigit():
+        await message.answer("❌ API ID должен быть числом:")
+        return
+    await state.update_data(api_id=int(message.text.strip()))
+    await state.set_state(AddTdata.api_hash)
+    await message.answer("🔑 Введите API Hash:")
+
+
+@router.message(AddTdata.api_hash)
+async def acc_tdata_api_hash(message: Message, state: FSMContext):
+    await state.update_data(api_hash=message.text.strip())
+    await state.set_state(AddTdata.proxy)
+    await message.answer(
+        "🌐 Введите прокси или <b>-</b> чтобы пропустить:",
+        parse_mode="HTML",
+    )
+
+
+@router.message(AddTdata.proxy)
+async def acc_tdata_proxy(message: Message, state: FSMContext):
+    proxy_text = message.text.strip()
+    proxy = None if proxy_text == "-" else proxy_text
+    data = await state.get_data()
+    await state.clear()
+
+    acc_id = await execute_returning(
+        "INSERT INTO accounts (phone, api_id, api_hash, proxy, status) VALUES (?, ?, ?, ?, 'importing')",
+        ("importing...", data["api_id"], data["api_hash"], proxy),
+    )
+
+    await message.answer("⏳ Импортирую tdata... Это может занять несколько секунд.")
+
+    from services.account_manager import import_tdata
+    result = await import_tdata(
+        zip_path=data["zip_path"],
+        api_id=data["api_id"],
+        api_hash=data["api_hash"],
+        acc_id=acc_id,
+        proxy_str=proxy,
+    )
+
+    # Удаляем временный ZIP
+    zip_path = data.get("zip_path")
+    if zip_path and os.path.exists(zip_path):
+        os.remove(zip_path)
+
+    if not result["ok"]:
+        await execute("DELETE FROM accounts WHERE id = ?", (acc_id,))
+        await message.answer(
+            f"❌ Ошибка импорта tdata: {result['error']}",
+            reply_markup=acc_add_method_kb(),
+        )
+        return
+
+    phone = result["phone"]
+    await execute(
+        "UPDATE accounts SET phone = ?, status = 'active' WHERE id = ?",
+        (phone, acc_id),
+    )
+    await message.answer(
+        f"✅ Аккаунт <code>{phone}</code> импортирован из tdata и активен (#{acc_id})!",
         reply_markup=account_item_kb(acc_id),
         parse_mode="HTML",
     )

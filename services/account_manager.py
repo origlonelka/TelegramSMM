@@ -1,8 +1,14 @@
+import logging
 import os
 import shutil
+import sqlite3
+import tempfile
+import zipfile
 from pyrogram import Client
 from pyrogram.errors import SessionPasswordNeeded
 from core.config import SESSIONS_DIR
+
+logger = logging.getLogger(__name__)
 
 os.makedirs(SESSIONS_DIR, exist_ok=True)
 
@@ -152,6 +158,119 @@ async def import_session_file(file_path: str, api_id: int, api_hash: str,
         if os.path.exists(dest):
             os.remove(dest)
         return {"ok": False, "error": str(e)}
+
+
+def _find_tdata_dir(base_path: str) -> str | None:
+    """Ищет папку tdata внутри извлечённого архива."""
+    # Может быть напрямую base_path/tdata или base_path/*/tdata
+    for root, dirs, _files in os.walk(base_path):
+        if "tdata" in dirs:
+            return os.path.join(root, "tdata")
+    # Или сама base_path и есть tdata
+    if os.path.basename(base_path) == "tdata":
+        return base_path
+    return None
+
+
+def _tdata_to_session(tdata_path: str, session_path: str, api_id: int) -> None:
+    """Конвертирует tdata в Pyrogram .session файл (SQLite)."""
+    from opentele.td import TDesktop
+
+    tdesk = TDesktop(tdata_path)
+    if not tdesk.isLoaded() or not tdesk.accounts:
+        raise ValueError("Не удалось прочитать tdata — файлы повреждены или папка пуста")
+
+    account = tdesk.accounts[0]
+    auth_key = account.authKey.key  # 256 bytes
+    dc_id = account.MainDcId
+
+    session_file = f"{session_path}.session"
+    conn = sqlite3.connect(session_file)
+    try:
+        conn.executescript("""
+            CREATE TABLE sessions (
+                dc_id     INTEGER PRIMARY KEY,
+                api_id    INTEGER,
+                test_mode INTEGER,
+                auth_key  BLOB,
+                date      INTEGER NOT NULL,
+                user_id   INTEGER,
+                is_bot    INTEGER
+            );
+            CREATE TABLE peers (
+                id             INTEGER PRIMARY KEY,
+                access_hash    INTEGER,
+                type           INTEGER NOT NULL,
+                username       TEXT,
+                phone_number   TEXT,
+                last_update_on INTEGER NOT NULL DEFAULT (CAST(STRFTIME('%s', 'now') AS INTEGER))
+            );
+            CREATE TABLE version (
+                number INTEGER PRIMARY KEY
+            );
+            CREATE INDEX idx_peers_id ON peers (id);
+            CREATE INDEX idx_peers_username ON peers (username);
+            CREATE INDEX idx_peers_phone_number ON peers (phone_number);
+        """)
+        conn.execute("INSERT INTO version VALUES (?)", (3,))
+        conn.execute(
+            "INSERT INTO sessions VALUES (?, ?, 0, ?, 0, 0, 0)",
+            (dc_id, api_id, auth_key),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+async def import_tdata(zip_path: str, api_id: int, api_hash: str,
+                       acc_id: int, proxy_str: str | None = None) -> dict:
+    """Импортирует аккаунт из ZIP-архива с tdata."""
+    tmp_dir = None
+    try:
+        # 1. Распаковываем ZIP
+        tmp_dir = tempfile.mkdtemp(prefix="tdata_")
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            zf.extractall(tmp_dir)
+
+        # 2. Ищем папку tdata
+        tdata_path = _find_tdata_dir(tmp_dir)
+        if not tdata_path:
+            return {"ok": False, "error": "Папка tdata не найдена в архиве"}
+
+        # 3. Конвертируем в Pyrogram session
+        session_path = _get_session_path(acc_id)
+        _tdata_to_session(tdata_path, session_path, api_id)
+
+        # 4. Подключаемся Pyrogram'ом для проверки
+        proxy = _parse_proxy(proxy_str)
+        client = Client(
+            name=session_path,
+            api_id=api_id,
+            api_hash=api_hash,
+            proxy=proxy,
+        )
+        await client.start()
+        me = await client.get_me()
+        phone = f"+{me.phone_number}" if me.phone_number else "unknown"
+        await client.stop()
+        _clients[acc_id] = client
+
+        logger.info(f"tdata imported for account #{acc_id}: {phone}")
+        return {"ok": True, "phone": phone}
+
+    except zipfile.BadZipFile:
+        return {"ok": False, "error": "Файл не является ZIP-архивом"}
+    except Exception as e:
+        # Удаляем session файл если создался
+        session_file = _get_session_path(acc_id) + ".session"
+        if os.path.exists(session_file):
+            os.remove(session_file)
+        logger.error(f"tdata import error: {e}", exc_info=True)
+        return {"ok": False, "error": str(e)}
+    finally:
+        # Чистим временную папку
+        if tmp_dir and os.path.exists(tmp_dir):
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 async def ensure_connected(acc) -> Client:
