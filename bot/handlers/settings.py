@@ -110,6 +110,12 @@ async def stats(callback: CallbackQuery):
         if today_total > 0 else "—"
     )
 
+    # Разбивка по режимам за сегодня
+    mode_stats = await fetch_all(
+        "SELECT mode, COUNT(*) as cnt FROM logs "
+        "WHERE status = 'sent' AND date(sent_at) = date('now') "
+        "GROUP BY mode ORDER BY cnt DESC")
+
     # Активная кампания
     active_camp = await fetch_one(
         "SELECT name, mode FROM campaigns WHERE is_active = 1 LIMIT 1")
@@ -141,8 +147,17 @@ async def stats(callback: CallbackQuery):
         f"Сегодня: {today_sent['cnt']}  (ошибок: {today_errors['cnt']})\n"
         f"За 7 дней: {week_sent['cnt']}\n"
         f"Всего: {total_sent['cnt']}  (ошибок: {total_errors['cnt']})\n"
-        f"Успешность сегодня: {success_rate}"
+        f"Успешность сегодня: {success_rate}\n\n"
+
+        f"<b>🎯 По режимам (сегодня):</b>\n"
     )
+    if mode_stats:
+        for ms in mode_stats:
+            m = ms['mode'] or 'comments'
+            label = MODE_LABELS.get(m, m)
+            text += f"{label}: {ms['cnt']}\n"
+    else:
+        text += "Нет данных\n"
     try:
         await callback.message.edit_text(
             text, reply_markup=stats_kb(), parse_mode="HTML")
@@ -352,6 +367,81 @@ async def stats_daily(callback: CallbackQuery):
         text += f"\n📈 Среднее в день: {avg:.0f}"
     else:
         text += "Нет данных за последние 7 дней"
+
+    try:
+        await callback.message.edit_text(
+            text, reply_markup=stats_sub_kb(), parse_mode="HTML")
+    except TelegramBadRequest:
+        pass
+    await callback.answer()
+
+
+# --- Статистика: по режимам ---
+
+@router.callback_query(F.data == "stats_modes")
+async def stats_modes(callback: CallbackQuery):
+    # Разбивка по режимам за сегодня
+    today_modes = await fetch_all(
+        "SELECT mode, "
+        "SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END) as sent, "
+        "SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as errors "
+        "FROM logs WHERE date(sent_at) = date('now') "
+        "GROUP BY mode ORDER BY sent DESC")
+
+    # Разбивка по режимам за 7 дней
+    week_modes = await fetch_all(
+        "SELECT mode, "
+        "SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END) as sent, "
+        "SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as errors "
+        "FROM logs WHERE sent_at >= datetime('now', '-7 days') "
+        "GROUP BY mode ORDER BY sent DESC")
+
+    # Разбивка по режимам за всё время
+    all_modes = await fetch_all(
+        "SELECT mode, "
+        "SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END) as sent, "
+        "SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as errors "
+        "FROM logs GROUP BY mode ORDER BY sent DESC")
+
+    text = "🎯 <b>Статистика по режимам</b>\n\n"
+
+    # Сегодня
+    text += "<b>Сегодня:</b>\n"
+    if today_modes:
+        for ms in today_modes:
+            m = ms['mode'] or 'comments'
+            label = MODE_LABELS.get(m, m)
+            err = f" / {ms['errors']} ❌" if ms['errors'] else ""
+            text += f"{label}: {ms['sent']} ✅{err}\n"
+    else:
+        text += "Нет данных\n"
+
+    # За 7 дней
+    text += "\n<b>За 7 дней:</b>\n"
+    if week_modes:
+        for ms in week_modes:
+            m = ms['mode'] or 'comments'
+            label = MODE_LABELS.get(m, m)
+            err = f" / {ms['errors']} ❌" if ms['errors'] else ""
+            text += f"{label}: {ms['sent']} ✅{err}\n"
+    else:
+        text += "Нет данных\n"
+
+    # Всё время
+    text += "\n<b>Всё время:</b>\n"
+    if all_modes:
+        for ms in all_modes:
+            m = ms['mode'] or 'comments'
+            label = MODE_LABELS.get(m, m)
+            err = f" / {ms['errors']} ❌" if ms['errors'] else ""
+            text += f"{label}: {ms['sent']} ✅{err}\n"
+
+        # Итоги
+        total_s = sum(ms['sent'] for ms in all_modes)
+        total_e = sum(ms['errors'] for ms in all_modes)
+        text += f"\n📊 Итого: {total_s} ✅ / {total_e} ❌"
+    else:
+        text += "Нет данных\n"
 
     try:
         await callback.message.edit_text(

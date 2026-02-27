@@ -128,6 +128,7 @@ CREATE TABLE IF NOT EXISTS logs (
     channel_id INTEGER,
     message_id INTEGER,
     post_id INTEGER,
+    mode TEXT,
     status TEXT DEFAULT 'sent',
     error TEXT,
     sent_at TEXT DEFAULT (datetime('now')),

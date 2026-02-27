@@ -54,7 +54,8 @@ async def run_campaign(campaign_id: int):
         message = random.choice(messages)
 
         # Отправляем комментарий
-        await _send_comment(account, channel, message, camp)
+        mode = camp["mode"] or "comments"
+        await _send_comment(account, channel, message, camp, mode)
 
         # Случайная задержка
         delay = random.randint(camp["delay_min"], camp["delay_max"])
@@ -80,7 +81,7 @@ async def _pick_account(accounts: list, camp) -> dict | None:
     return min(available, key=lambda a: a["comments_today"])
 
 
-async def _send_comment(account, channel, message, camp):
+async def _send_comment(account, channel, message, camp, mode="comments"):
     """Отправляет комментарий в канал от имени аккаунта."""
     channel_username = channel['username']
     logger.info(f"[v2] _send_comment: аккаунт #{account['id']} -> @{channel_username}")
@@ -150,9 +151,9 @@ async def _send_comment(account, channel, message, camp):
 
             # Логируем
             await execute_returning(
-                "INSERT INTO logs (account_id, channel_id, message_id, post_id, status) "
-                "VALUES (?, ?, ?, ?, 'sent')",
-                (account["id"], channel["id"], message["id"], post.id),
+                "INSERT INTO logs (account_id, channel_id, message_id, post_id, mode, status) "
+                "VALUES (?, ?, ?, ?, ?, 'sent')",
+                (account["id"], channel["id"], message["id"], post.id, mode),
             )
 
             logger.info(
@@ -166,9 +167,9 @@ async def _send_comment(account, channel, message, camp):
         await disconnect(account["id"])
         await delete_account(account["id"])
         await execute_returning(
-            "INSERT INTO logs (account_id, channel_id, message_id, status, error) "
-            "VALUES (?, ?, ?, 'error', ?)",
-            (account["id"], channel["id"], message["id"], f"DELETED: {e}"),
+            "INSERT INTO logs (account_id, channel_id, message_id, mode, status, error) "
+            "VALUES (?, ?, ?, ?, 'error', ?)",
+            (account["id"], channel["id"], message["id"], mode, f"DELETED: {e}"),
         )
 
     except FloodWait as e:
@@ -182,15 +183,15 @@ async def _send_comment(account, channel, message, camp):
             (account["id"],),
         )
         await execute_returning(
-            "INSERT INTO logs (account_id, channel_id, message_id, status, error) "
-            "VALUES (?, ?, ?, 'error', ?)",
-            (account["id"], channel["id"], message["id"], str(e)),
+            "INSERT INTO logs (account_id, channel_id, message_id, mode, status, error) "
+            "VALUES (?, ?, ?, ?, 'error', ?)",
+            (account["id"], channel["id"], message["id"], mode, str(e)),
         )
 
     except Exception as e:
         logger.error(f"Ошибка отправки: {e}")
         await execute_returning(
-            "INSERT INTO logs (account_id, channel_id, message_id, status, error) "
-            "VALUES (?, ?, ?, 'error', ?)",
-            (account["id"], channel["id"], message["id"], str(e)),
+            "INSERT INTO logs (account_id, channel_id, message_id, mode, status, error) "
+            "VALUES (?, ?, ?, ?, 'error', ?)",
+            (account["id"], channel["id"], message["id"], mode, str(e)),
         )

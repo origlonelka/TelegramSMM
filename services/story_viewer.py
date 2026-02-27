@@ -100,8 +100,8 @@ async def _view_stories(account, channel, camp):
         )
 
         await execute_returning(
-            "INSERT INTO logs (account_id, channel_id, status) "
-            "VALUES (?, ?, 'sent')",
+            "INSERT INTO logs (account_id, channel_id, mode, status) "
+            "VALUES (?, ?, 'stories', 'sent')",
             (account["id"], channel["id"]),
         )
 
@@ -129,7 +129,7 @@ async def _view_stories(account, channel, camp):
     except Exception as e:
         logger.error(f"Ошибка просмотра Stories @{channel_username}: {e}")
         await execute_returning(
-            "INSERT INTO logs (account_id, channel_id, status, error) "
-            "VALUES (?, ?, 'error', ?)",
+            "INSERT INTO logs (account_id, channel_id, mode, status, error) "
+            "VALUES (?, ?, 'stories', 'error', ?)",
             (account["id"], channel["id"], str(e)),
         )

@@ -23,6 +23,7 @@ async def init_db():
     for migration in [
         "ALTER TABLE accounts ADD COLUMN proxy TEXT",
         "ALTER TABLE campaigns ADD COLUMN mode TEXT DEFAULT 'comments'",
+        "ALTER TABLE logs ADD COLUMN mode TEXT",
     ]:
         try:
             await db.execute(migration)

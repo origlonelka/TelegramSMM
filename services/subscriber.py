@@ -96,8 +96,8 @@ async def _subscribe_and_view(account, channel, camp):
         )
 
         await execute_returning(
-            "INSERT INTO logs (account_id, channel_id, status) "
-            "VALUES (?, ?, 'sent')",
+            "INSERT INTO logs (account_id, channel_id, mode, status) "
+            "VALUES (?, ?, 'subscribe', 'sent')",
             (account["id"], channel["id"]),
         )
 
@@ -120,7 +120,7 @@ async def _subscribe_and_view(account, channel, camp):
     except Exception as e:
         logger.error(f"Ошибка подписки @{channel_username}: {e}")
         await execute_returning(
-            "INSERT INTO logs (account_id, channel_id, status, error) "
-            "VALUES (?, ?, 'error', ?)",
+            "INSERT INTO logs (account_id, channel_id, mode, status, error) "
+            "VALUES (?, ?, 'subscribe', 'error', ?)",
             (account["id"], channel["id"], str(e)),
         )
