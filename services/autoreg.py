@@ -244,38 +244,27 @@ async def register_one_account(country: int = 0,
 
         sent_code = await client.send_code(phone)
 
-        # Проверяем тип доставки: если не SMS — пересылаем через SMS
+        # Проверяем тип доставки: если не SMS — пробуем переключить
         _SMS_TYPES = {SentCodeType.SMS, SentCodeType.FRAGMENT_SMS}
         code_type = sent_code.type
         logger.info(f"Авторег {phone}: тип кода — {code_type}")
-        sms_delivery = code_type in _SMS_TYPES
 
-        if not sms_delivery:
+        if code_type not in _SMS_TYPES:
             try:
                 if progress_callback:
                     await progress_callback(
-                        f"📱 {phone}\n🔄 Код отправлен через {code_type.name}, запрашиваю SMS...")
+                        f"📱 {phone}\n🔄 Код через {code_type.name}, запрашиваю SMS...")
                 sent_code = await client.resend_code(phone, sent_code.phone_code_hash)
                 code_type = sent_code.type
                 logger.info(f"Авторег {phone}: повторный тип кода — {code_type}")
-                sms_delivery = code_type in _SMS_TYPES
             except Exception as e:
                 logger.warning(f"Авторег {phone}: resend_code не удался: {e}")
-
-        if not sms_delivery:
-            logger.error(f"Авторег {phone}: не удалось получить SMS-доставку, тип: {code_type}")
-            await _set_activation_status(activation_id, 8)
-            try:
-                await client.disconnect()
-            except Exception:
-                pass
-            await _cleanup_account(acc_id, session_path)
-            return {"ok": False, "error": f"{phone} — Telegram отправил код через {code_type.name}, а не SMS"}
 
         phone_code_hash = sent_code.phone_code_hash
 
         if progress_callback:
-            await progress_callback(f"📱 {phone}\n⏳ Жду SMS-код...")
+            status = "📨 SMS" if code_type in _SMS_TYPES else f"📨 {code_type.name} (жду SMS)"
+            await progress_callback(f"📱 {phone}\n{status}\n⏳ Жду код...")
 
         # 4. Ждём код
         code = await _wait_for_code(activation_id, timeout=150)
