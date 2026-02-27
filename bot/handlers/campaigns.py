@@ -22,7 +22,7 @@ class SetLimit(StatesGroup):
 
 # --- Меню кампаний ---
 
-@router.callback_query(F.data == "campaigns")
+@router.callback_query(F.data.in_({"campaigns", "back_campaigns"}))
 async def campaigns_menu(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     count = await fetch_one("SELECT COUNT(*) as cnt FROM campaigns")

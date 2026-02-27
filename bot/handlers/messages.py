@@ -17,7 +17,7 @@ class AddMessage(StatesGroup):
 
 # --- Меню сообщений ---
 
-@router.callback_query(F.data == "messages")
+@router.callback_query(F.data.in_({"messages", "back_messages"}))
 async def messages_menu(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     count = await fetch_one("SELECT COUNT(*) as cnt FROM messages")

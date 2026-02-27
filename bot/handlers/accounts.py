@@ -66,7 +66,7 @@ class EditProxy(StatesGroup):
 
 # --- Меню аккаунтов ---
 
-@router.callback_query(F.data == "accounts")
+@router.callback_query(F.data.in_({"accounts", "back_accounts"}))
 async def accounts_menu(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     count = await fetch_one("SELECT COUNT(*) as cnt FROM accounts")

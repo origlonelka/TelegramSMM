@@ -21,7 +21,7 @@ class SearchChannel(StatesGroup):
 
 # --- Меню каналов ---
 
-@router.callback_query(F.data == "channels")
+@router.callback_query(F.data.in_({"channels", "back_channels"}))
 async def channels_menu(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     count = await fetch_one("SELECT COUNT(*) as cnt FROM channels")

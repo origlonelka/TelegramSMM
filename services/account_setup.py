@@ -33,6 +33,14 @@ async def apply_template(acc, template) -> dict:
 
         # Устанавливаем фото, если указано
         if template["photo_path"] and os.path.exists(template["photo_path"]):
+            # Удаляем старые аватарки перед установкой новой
+            try:
+                photos = [p async for p in client.get_chat_photos("me")]
+                if photos:
+                    await client.delete_profile_photos(
+                        [p.file_id for p in photos])
+            except Exception as e:
+                logger.warning(f"Не удалось удалить старые фото аккаунта #{acc['id']}: {e}")
             await client.set_profile_photo(photo=template["photo_path"])
 
         logger.info(
