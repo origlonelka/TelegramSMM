@@ -118,16 +118,20 @@ async def _send_comment(account, channel, message, camp):
             return
 
         # Получаем последний пост канала
-        async for post in client.get_chat_history(f"@{channel['username']}", limit=1):
+        channel_id = f"@{channel['username']}"
+        async for post in client.get_chat_history(channel_id, limit=1):
             if not post.id:
                 break
 
-            # Обрабатываем spintax и отправляем комментарий
+            # Получаем зеркальный пост в группе обсуждений
+            discussion_msg = await client.get_discussion_message(channel_id, post.id)
+
+            # Обрабатываем spintax и отправляем комментарий в группу обсуждений
             comment_text = spin(message["text"])
             await client.send_message(
-                chat_id=f"@{channel['username']}",
+                chat_id=discussion_msg.chat.id,
                 text=comment_text,
-                reply_to_message_id=post.id,
+                reply_to_message_id=discussion_msg.id,
             )
 
             # Обновляем счётчики
