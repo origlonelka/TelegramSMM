@@ -82,49 +82,55 @@ async def _pick_account(accounts: list, camp) -> dict | None:
 
 async def _send_comment(account, channel, message, camp):
     """Отправляет комментарий в канал от имени аккаунта."""
+    channel_username = channel['username']
+    logger.info(f"[v2] _send_comment: аккаунт #{account['id']} -> @{channel_username}")
+
     try:
         client = await ensure_connected(account)
 
-        # Подписываемся на канал, если ещё не подписаны
+        # 1. Подписываемся на канал
         try:
-            await client.join_chat(f"@{channel['username']}")
-            logger.info(f"Аккаунт #{account['id']} подписался на @{channel['username']}")
+            await client.join_chat(f"@{channel_username}")
+            logger.info(f"Аккаунт #{account['id']} подписался на @{channel_username}")
         except UserAlreadyParticipant:
-            pass
-        except InviteRequestSent:
-            logger.warning(f"@{channel['username']} требует одобрения заявки, пропускаю")
-            return
-        except ChannelPrivate:
-            logger.warning(f"@{channel['username']} — приватный канал, пропускаю")
+            logger.info(f"Аккаунт #{account['id']} уже подписан на @{channel_username}")
+        except Exception as e:
+            logger.error(f"Не удалось подписаться на @{channel_username}: {type(e).__name__}: {e}")
             return
 
-        # Подписываемся на группу обсуждений (комментарии идут туда)
+        # 2. Подписываемся на группу обсуждений (комментарии идут туда)
         try:
-            chat = await client.get_chat(f"@{channel['username']}")
+            chat = await client.get_chat(f"@{channel_username}")
             if chat.linked_chat:
                 try:
                     await client.join_chat(chat.linked_chat.id)
                     logger.info(
                         f"Аккаунт #{account['id']} вступил в группу обсуждений "
-                        f"канала @{channel['username']} (id={chat.linked_chat.id})"
+                        f"@{channel_username} (id={chat.linked_chat.id})"
                     )
                 except UserAlreadyParticipant:
-                    pass
+                    logger.info(f"Аккаунт #{account['id']} уже в группе обсуждений @{channel_username}")
+                except Exception as e:
+                    logger.error(f"Не удалось вступить в группу обсуждений @{channel_username}: {type(e).__name__}: {e}")
             else:
-                logger.warning(f"@{channel['username']} не имеет группы обсуждений, пропускаю")
+                logger.warning(f"@{channel_username} не имеет группы обсуждений, пропускаю")
                 return
         except Exception as e:
-            logger.warning(f"Не удалось получить группу обсуждений @{channel['username']}: {e}")
+            logger.error(f"Не удалось получить инфо о @{channel_username}: {type(e).__name__}: {e}")
             return
 
-        # Получаем последний пост канала
-        channel_id = f"@{channel['username']}"
+        # 3. Получаем последний пост и отправляем комментарий
+        channel_id = f"@{channel_username}"
         async for post in client.get_chat_history(channel_id, limit=1):
             if not post.id:
                 break
 
             # Получаем зеркальный пост в группе обсуждений
             discussion_msg = await client.get_discussion_message(channel_id, post.id)
+            logger.info(
+                f"Discussion message: chat_id={discussion_msg.chat.id}, "
+                f"msg_id={discussion_msg.id} для поста {post.id}"
+            )
 
             # Обрабатываем spintax и отправляем комментарий в группу обсуждений
             comment_text = spin(message["text"])
