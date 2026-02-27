@@ -185,6 +185,9 @@ async def _wait_for_code(activation_id: str, timeout: int = 150) -> str | None:
 
 # --- Регистрация ---
 
+MAX_NUMBER_ATTEMPTS = 3  # Сколько раз пробовать купить новый номер
+
+
 async def register_one_account(country: int = 0,
                                 progress_callback=None) -> dict:
     """Полный цикл авторегистрации одного аккаунта.
@@ -205,168 +208,190 @@ async def register_one_account(country: int = 0,
     proxy_url = proxy_row["url"] if proxy_row else None
     proxy_dict = _parse_proxy(proxy_url)
 
-    # 1. Покупаем номер
-    if progress_callback:
-        await progress_callback("📱 Покупаю номер...")
+    _SMS_TYPES = {SentCodeType.SMS, SentCodeType.FRAGMENT_SMS}
 
-    try:
-        number_info = await _buy_number(country)
-    except Exception as e:
-        return {"ok": False, "error": f"Покупка номера: {e}"}
-
-    phone = number_info["phone"]
-    activation_id = number_info["activation_id"]
-
-    if progress_callback:
-        await progress_callback(f"📱 {phone}\n📡 Отправляю код...")
-
-    # 2. Создаём запись в БД для получения ID
-    acc_id = await execute_returning(
-        "INSERT INTO accounts (phone, api_id, api_hash, proxy, status) "
-        "VALUES (?, ?, ?, ?, 'registering')",
-        (phone, API_ID, API_HASH, proxy_url),
-    )
-
-    session_path = os.path.join(SESSIONS_DIR, f"account_{acc_id}")
-    client = Client(
-        name=session_path,
-        api_id=API_ID,
-        api_hash=API_HASH,
-        proxy=proxy_dict,
-    )
-
-    try:
-        await client.connect()
-
-        # 3. Сообщаем SMS-сервису: готовы принять SMS (ДО send_code,
-        #    чтобы hero-sms перехватил SMS, которое Telegram отправит мгновенно)
-        await _set_activation_status(activation_id, 1)
-
-        sent_code = await client.send_code(phone)
-
-        # Проверяем тип доставки: если не SMS — пробуем переключить
-        _SMS_TYPES = {SentCodeType.SMS, SentCodeType.FRAGMENT_SMS}
-        code_type = sent_code.type
-        logger.info(f"Авторег {phone}: тип кода — {code_type}")
-
-        if code_type not in _SMS_TYPES:
-            try:
-                if progress_callback:
-                    await progress_callback(
-                        f"📱 {phone}\n🔄 Код через {code_type.name}, запрашиваю SMS...")
-                sent_code = await client.resend_code(phone, sent_code.phone_code_hash)
-                code_type = sent_code.type
-                logger.info(f"Авторег {phone}: повторный тип кода — {code_type}")
-            except Exception as e:
-                logger.warning(f"Авторег {phone}: resend_code не удался: {e}")
-
-        phone_code_hash = sent_code.phone_code_hash
-
+    # Цикл попыток — если номер уже зарегистрирован (код через APP), берём новый
+    for attempt in range(1, MAX_NUMBER_ATTEMPTS + 1):
         if progress_callback:
-            status = "📨 SMS" if code_type in _SMS_TYPES else f"📨 {code_type.name} (жду SMS)"
-            await progress_callback(f"📱 {phone}\n{status}\n⏳ Жду код...")
+            prefix = f"[{attempt}/{MAX_NUMBER_ATTEMPTS}] " if attempt > 1 else ""
+            await progress_callback(f"{prefix}📱 Покупаю номер...")
 
-        # 4. Ждём код
-        code = await _wait_for_code(activation_id, timeout=150)
-
-        if not code:
-            await _set_activation_status(activation_id, 8)  # отмена
-            try:
-                await client.disconnect()
-            except Exception:
-                pass
-            await _cleanup_account(acc_id, session_path)
-            return {"ok": False, "error": f"SMS не пришёл для {phone}"}
-
-        if progress_callback:
-            await progress_callback(f"📱 {phone}\n🔑 Код получен, регистрирую...")
-
-        # 5. Входим / регистрируемся
-        is_new = False
         try:
-            await client.sign_in(phone, phone_code_hash, code)
+            number_info = await _buy_number(country)
         except Exception as e:
-            err_name = type(e).__name__
-            if "PhoneNumberUnoccupied" in err_name or "PHONE_NUMBER_UNOCCUPIED" in str(e).upper():
-                first_name = spin(DEFAULT_NAMES)
-                await client.sign_up(phone, phone_code_hash, first_name)
-                is_new = True
-            elif isinstance(e, SessionPasswordNeeded):
-                # Аккаунт с 2FA — не можем авторег
-                await _set_activation_status(activation_id, 6)
+            return {"ok": False, "error": f"Покупка номера: {e}"}
+
+        phone = number_info["phone"]
+        activation_id = number_info["activation_id"]
+
+        if progress_callback:
+            prefix = f"[{attempt}/{MAX_NUMBER_ATTEMPTS}] " if attempt > 1 else ""
+            await progress_callback(f"{prefix}📱 {phone}\n📡 Отправляю код...")
+
+        # Создаём запись в БД
+        acc_id = await execute_returning(
+            "INSERT INTO accounts (phone, api_id, api_hash, proxy, status) "
+            "VALUES (?, ?, ?, ?, 'registering')",
+            (phone, API_ID, API_HASH, proxy_url),
+        )
+
+        session_path = os.path.join(SESSIONS_DIR, f"account_{acc_id}")
+        client = Client(
+            name=session_path,
+            api_id=API_ID,
+            api_hash=API_HASH,
+            proxy=proxy_dict,
+        )
+
+        try:
+            await client.connect()
+
+            # Сообщаем SMS-сервису: готовы принять SMS (ДО send_code)
+            await _set_activation_status(activation_id, 1)
+
+            sent_code = await client.send_code(phone)
+            code_type = sent_code.type
+            logger.info(f"Авторег {phone}: тип кода — {code_type}")
+
+            # Если код не через SMS — номер уже зарегистрирован, пробуем resend
+            if code_type not in _SMS_TYPES:
+                try:
+                    sent_code = await client.resend_code(phone, sent_code.phone_code_hash)
+                    code_type = sent_code.type
+                    logger.info(f"Авторег {phone}: повторный тип — {code_type}")
+                except Exception as e:
+                    logger.warning(f"Авторег {phone}: resend_code не удался: {e}")
+
+            # Всё ещё не SMS — номер занят, отменяем и берём следующий
+            if code_type not in _SMS_TYPES:
+                logger.warning(
+                    f"Авторег {phone}: код через {code_type.name}, номер уже занят "
+                    f"(попытка {attempt}/{MAX_NUMBER_ATTEMPTS})")
+                await _set_activation_status(activation_id, 8)
                 try:
                     await client.disconnect()
                 except Exception:
                     pass
                 await _cleanup_account(acc_id, session_path)
-                return {"ok": False, "error": f"{phone} — требуется 2FA пароль"}
-            else:
-                raise
 
-        await client.disconnect()
+                if progress_callback:
+                    await progress_callback(
+                        f"⚠️ {phone} уже в Telegram (код через {code_type.name}), "
+                        f"беру другой номер...")
+                continue  # следующая попытка
 
-        # 6. Успех — обновляем БД
-        await execute(
-            "UPDATE accounts SET status = 'active', session_file = ? WHERE id = ?",
-            (session_path + ".session", acc_id),
-        )
+            phone_code_hash = sent_code.phone_code_hash
 
-        # Привязываем прокси
-        if proxy_row:
+            if progress_callback:
+                await progress_callback(f"📱 {phone}\n📨 SMS\n⏳ Жду код...")
+
+            # Ждём код
+            code = await _wait_for_code(activation_id, timeout=150)
+
+            if not code:
+                await _set_activation_status(activation_id, 8)
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+                await _cleanup_account(acc_id, session_path)
+                return {"ok": False, "error": f"SMS не пришёл для {phone}"}
+
+            if progress_callback:
+                await progress_callback(f"📱 {phone}\n🔑 Код получен, регистрирую...")
+
+            # 5. Входим / регистрируемся
+            is_new = False
+            try:
+                await client.sign_in(phone, phone_code_hash, code)
+            except Exception as e:
+                err_name = type(e).__name__
+                if "PhoneNumberUnoccupied" in err_name or "PHONE_NUMBER_UNOCCUPIED" in str(e).upper():
+                    first_name = spin(DEFAULT_NAMES)
+                    await client.sign_up(phone, phone_code_hash, first_name)
+                    is_new = True
+                elif isinstance(e, SessionPasswordNeeded):
+                    await _set_activation_status(activation_id, 6)
+                    try:
+                        await client.disconnect()
+                    except Exception:
+                        pass
+                    await _cleanup_account(acc_id, session_path)
+                    return {"ok": False, "error": f"{phone} — требуется 2FA пароль"}
+                else:
+                    raise
+
+            await client.disconnect()
+
+            # 6. Успех — обновляем БД
             await execute(
-                "UPDATE proxies SET account_id = ? WHERE id = ?",
-                (acc_id, proxy_row["id"]))
+                "UPDATE accounts SET status = 'active', session_file = ? WHERE id = ?",
+                (session_path + ".session", acc_id),
+            )
 
-        # Завершаем активацию на SMS-сервисе
-        await _set_activation_status(activation_id, 6)
+            if proxy_row:
+                await execute(
+                    "UPDATE proxies SET account_id = ? WHERE id = ?",
+                    (acc_id, proxy_row["id"]))
 
-        logger.info(
-            f"Авторег: {phone} (#{acc_id}) — "
-            f"{'новый аккаунт' if is_new else 'существующий'}")
+            await _set_activation_status(activation_id, 6)
 
-        return {
-            "ok": True,
-            "phone": phone,
-            "acc_id": acc_id,
-            "is_new": is_new,
-        }
+            logger.info(
+                f"Авторег: {phone} (#{acc_id}) — "
+                f"{'новый аккаунт' if is_new else 'существующий'}")
 
-    except FloodWait as e:
-        await _set_activation_status(activation_id, 8)
-        try:
-            await client.disconnect()
-        except Exception:
-            pass
-        await _cleanup_account(acc_id, session_path)
-        return {"ok": False, "error": f"FloodWait: подождите {e.value} сек"}
+            return {
+                "ok": True,
+                "phone": phone,
+                "acc_id": acc_id,
+                "is_new": is_new,
+            }
 
-    except PhoneNumberBanned:
-        await _set_activation_status(activation_id, 8)
-        try:
-            await client.disconnect()
-        except Exception:
-            pass
-        await _cleanup_account(acc_id, session_path)
-        return {"ok": False, "error": f"{phone} забанен в Telegram"}
+        except FloodWait as e:
+            await _set_activation_status(activation_id, 8)
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+            await _cleanup_account(acc_id, session_path)
+            return {"ok": False, "error": f"FloodWait: подождите {e.value} сек"}
 
-    except PhoneNumberInvalid:
-        await _set_activation_status(activation_id, 8)
-        try:
-            await client.disconnect()
-        except Exception:
-            pass
-        await _cleanup_account(acc_id, session_path)
-        return {"ok": False, "error": f"{phone} — невалидный номер"}
+        except PhoneNumberBanned:
+            await _set_activation_status(activation_id, 8)
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+            await _cleanup_account(acc_id, session_path)
+            # Забаненный номер — пробуем следующий
+            if progress_callback:
+                await progress_callback(f"⚠️ {phone} забанен, беру другой номер...")
+            continue
 
-    except Exception as e:
-        await _set_activation_status(activation_id, 8)
-        try:
-            await client.disconnect()
-        except Exception:
-            pass
-        await _cleanup_account(acc_id, session_path)
-        logger.error(f"Авторег ошибка: {e}", exc_info=True)
-        return {"ok": False, "error": str(e)}
+        except PhoneNumberInvalid:
+            await _set_activation_status(activation_id, 8)
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+            await _cleanup_account(acc_id, session_path)
+            # Невалидный номер — пробуем следующий
+            if progress_callback:
+                await progress_callback(f"⚠️ {phone} невалидный, беру другой номер...")
+            continue
+
+        except Exception as e:
+            await _set_activation_status(activation_id, 8)
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+            await _cleanup_account(acc_id, session_path)
+            logger.error(f"Авторег ошибка: {e}", exc_info=True)
+            return {"ok": False, "error": str(e)}
+
+    # Все попытки исчерпаны
+    return {"ok": False, "error": f"Не удалось найти свободный номер за {MAX_NUMBER_ATTEMPTS} попыток"}
 
 
 async def _cleanup_account(acc_id: int, session_path: str):
