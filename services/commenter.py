@@ -2,7 +2,11 @@ import random
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from pyrogram.errors import FloodWait, PeerFlood, UserBannedInChannel, AuthKeyUnregistered, UserDeactivated, UserDeactivatedBan
+from pyrogram.errors import (
+    FloodWait, PeerFlood, UserBannedInChannel,
+    AuthKeyUnregistered, UserDeactivated, UserDeactivatedBan,
+    UserAlreadyParticipant, ChannelPrivate, InviteRequestSent,
+)
 from db.database import execute, fetch_one, fetch_all, execute_returning, delete_account
 from services.account_manager import ensure_connected, disconnect
 from services.spintax import spin
@@ -80,6 +84,19 @@ async def _send_comment(account, channel, message, camp):
     """Отправляет комментарий в канал от имени аккаунта."""
     try:
         client = await ensure_connected(account)
+
+        # Подписываемся на канал, если ещё не подписаны
+        try:
+            await client.join_chat(f"@{channel['username']}")
+            logger.info(f"Аккаунт #{account['id']} подписался на @{channel['username']}")
+        except UserAlreadyParticipant:
+            pass
+        except InviteRequestSent:
+            logger.warning(f"@{channel['username']} требует одобрения заявки, пропускаю")
+            return
+        except ChannelPrivate:
+            logger.warning(f"@{channel['username']} — приватный канал, пропускаю")
+            return
 
         # Получаем последний пост канала
         async for post in client.get_chat_history(f"@{channel['username']}", limit=1):
