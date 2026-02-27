@@ -199,11 +199,12 @@ def camp_confirm_del_kb(camp_id: int) -> InlineKeyboardMarkup:
 def camp_select_items_kb(items: list, prefix: str, camp_id: int, selected_ids: set) -> InlineKeyboardMarkup:
     buttons = []
     for item in items:
-        check = "✅" if item["id"] in selected_ids else "⬜"
-        label = item.get("phone") or item.get("username") or item.get("text", "")[:30]
+        d = dict(item)
+        check = "✅" if d["id"] in selected_ids else "⬜"
+        label = d.get("phone") or d.get("username") or d.get("text", "")[:30]
         buttons.append([InlineKeyboardButton(
             text=f"{check} {label}",
-            callback_data=f"{prefix}_toggle_{camp_id}_{item['id']}"
+            callback_data=f"{prefix}_toggle_{camp_id}_{d['id']}"
         )])
     buttons.append([InlineKeyboardButton(text="💾 Сохранить", callback_data=f"camp_view_{camp_id}")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
