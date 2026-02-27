@@ -67,7 +67,7 @@ def _parse_proxy(proxy_str: str | None) -> dict | None:
 def get_client(acc) -> Client:
     acc_id = acc["id"]
     if acc_id not in _clients:
-        proxy = _parse_proxy(acc.get("proxy"))
+        proxy = _parse_proxy(acc["proxy"])
         _clients[acc_id] = Client(
             name=_get_session_path(acc_id),
             api_id=acc["api_id"],
