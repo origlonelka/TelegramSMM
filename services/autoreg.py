@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import logging
 import aiohttp
@@ -70,12 +71,43 @@ async def get_balance() -> float:
     raise Exception(f"Ошибка: {text}")
 
 
-async def _buy_number(country: int = 0) -> dict:
+async def _get_min_price(country: int = 0) -> float | None:
+    """Получает минимальную цену на номер Telegram в указанной стране."""
     text = await _sms_request({
-        "action": "getNumber",
+        "action": "getPrices",
         "service": "tg",
         "country": str(country),
     })
+    try:
+        data = json.loads(text)
+        prices = []
+
+        def extract_prices(obj):
+            if isinstance(obj, dict):
+                if "cost" in obj:
+                    prices.append(float(obj["cost"]))
+                else:
+                    for v in obj.values():
+                        extract_prices(v)
+
+        extract_prices(data)
+        return min(prices) if prices else None
+    except Exception:
+        return None
+
+
+async def _buy_number(country: int = 0) -> dict:
+    min_price = await _get_min_price(country)
+
+    params = {
+        "action": "getNumber",
+        "service": "tg",
+        "country": str(country),
+    }
+    if min_price is not None:
+        params["maxPrice"] = str(min_price)
+
+    text = await _sms_request(params)
     if text.startswith("ACCESS_NUMBER:"):
         parts = text.split(":")
         return {"activation_id": parts[1], "phone": "+" + parts[2]}
