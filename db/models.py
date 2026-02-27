@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS accounts (
     phone TEXT UNIQUE NOT NULL,
     api_id INTEGER NOT NULL,
     api_hash TEXT NOT NULL,
+    proxy TEXT,
     session_file TEXT,
     status TEXT DEFAULT 'inactive',
     comments_today INTEGER DEFAULT 0,

@@ -15,10 +15,15 @@ class AddAccount(StatesGroup):
     phone = State()
     api_id = State()
     api_hash = State()
+    proxy = State()
 
 
 class AuthAccount(StatesGroup):
     code = State()
+
+
+class EditProxy(StatesGroup):
+    value = State()
 
 
 # --- Меню аккаунтов ---
@@ -58,10 +63,12 @@ async def acc_view(callback: CallbackQuery):
         await callback.answer("Аккаунт не найден", show_alert=True)
         return
     status_icon = "🟢" if acc["status"] == "active" else "🔴"
+    proxy_display = f"<code>{acc['proxy']}</code>" if acc["proxy"] else "не задан"
     text = (
         f"📱 <b>Аккаунт #{acc['id']}</b>\n\n"
         f"Телефон: <code>{acc['phone']}</code>\n"
         f"Статус: {status_icon} {acc['status']}\n"
+        f"Прокси: {proxy_display}\n"
         f"Комментариев сегодня: {acc['comments_today']}\n"
         f"Комментариев за час: {acc['comments_hour']}\n"
         f"Добавлен: {acc['added_at']}"
@@ -112,12 +119,29 @@ async def acc_add_api_id(message: Message, state: FSMContext):
 @router.message(AddAccount.api_hash)
 async def acc_add_api_hash(message: Message, state: FSMContext):
     api_hash = message.text.strip()
+    await state.update_data(api_hash=api_hash)
+    await state.set_state(AddAccount.proxy)
+    await message.answer(
+        "🌐 Введите прокси (необязательно):\n\n"
+        "Форматы:\n"
+        "<code>socks5://user:pass@host:port</code>\n"
+        "<code>http://host:port</code>\n"
+        "<code>socks5://host:port</code>\n\n"
+        "Или отправьте <b>-</b> чтобы пропустить.",
+        parse_mode="HTML",
+    )
+
+
+@router.message(AddAccount.proxy)
+async def acc_add_proxy(message: Message, state: FSMContext):
+    proxy_text = message.text.strip()
+    proxy = None if proxy_text == "-" else proxy_text
     data = await state.get_data()
     await state.clear()
 
     acc_id = await execute_returning(
-        "INSERT INTO accounts (phone, api_id, api_hash) VALUES (?, ?, ?)",
-        (data["phone"], data["api_id"], api_hash),
+        "INSERT INTO accounts (phone, api_id, api_hash, proxy) VALUES (?, ?, ?, ?)",
+        (data["phone"], data["api_id"], data["api_hash"], proxy),
     )
     await message.answer(
         f"✅ Аккаунт <code>{data['phone']}</code> добавлен (#{acc_id}).\n\n"
@@ -203,5 +227,44 @@ async def acc_auth_code(message: Message, state: FSMContext):
     await execute("UPDATE accounts SET status = 'active' WHERE id = ?", (acc_id,))
     await message.answer(
         f"✅ Аккаунт успешно авторизован!",
+        reply_markup=account_item_kb(acc_id),
+    )
+
+
+# --- Редактирование прокси ---
+
+@router.callback_query(F.data.startswith("acc_proxy_"))
+async def acc_proxy_edit(callback: CallbackQuery, state: FSMContext):
+    acc_id = int(callback.data.split("_")[2])
+    await state.set_state(EditProxy.value)
+    await state.update_data(acc_id=acc_id)
+    await callback.message.edit_text(
+        "🌐 Введите новый прокси:\n\n"
+        "Форматы:\n"
+        "<code>socks5://user:pass@host:port</code>\n"
+        "<code>http://host:port</code>\n"
+        "<code>socks5://host:port</code>\n\n"
+        "Или отправьте <b>-</b> чтобы убрать прокси.",
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.message(EditProxy.value)
+async def acc_proxy_save(message: Message, state: FSMContext):
+    data = await state.get_data()
+    acc_id = data["acc_id"]
+    proxy_text = message.text.strip()
+    proxy = None if proxy_text == "-" else proxy_text
+    await state.clear()
+
+    await execute("UPDATE accounts SET proxy = ? WHERE id = ?", (proxy, acc_id))
+
+    # Сбрасываем клиент чтобы пересоздать с новым прокси
+    from services.account_manager import disconnect
+    await disconnect(acc_id)
+
+    await message.answer(
+        f"✅ Прокси {'обновлён' if proxy else 'удалён'}.",
         reply_markup=account_item_kb(acc_id),
     )

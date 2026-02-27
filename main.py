@@ -4,7 +4,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from core.config import BOT_TOKEN
-from db.database import init_db
+from db.database import init_db, close_db
 from core.scheduler import start_scheduler
 
 from bot.handlers import start, accounts, channels, messages, campaigns, settings
@@ -39,7 +39,10 @@ async def main():
 
     # Запуск бота
     logger.info("Бот запущен")
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    finally:
+        await close_db()
 
 
 if __name__ == "__main__":

@@ -12,14 +12,60 @@ def _get_session_path(acc_id: int) -> str:
     return os.path.join(SESSIONS_DIR, f"account_{acc_id}")
 
 
+def _parse_proxy(proxy_str: str | None) -> dict | None:
+    """Парсит строку прокси в dict для Pyrogram.
+
+    Форматы:
+      socks5://user:pass@host:port
+      http://host:port
+      socks5://host:port
+    """
+    if not proxy_str:
+        return None
+
+    proxy_str = proxy_str.strip()
+    scheme = "socks5"
+    rest = proxy_str
+
+    if "://" in proxy_str:
+        scheme, rest = proxy_str.split("://", 1)
+
+    username = None
+    password = None
+
+    if "@" in rest:
+        creds, rest = rest.rsplit("@", 1)
+        if ":" in creds:
+            username, password = creds.split(":", 1)
+        else:
+            username = creds
+
+    if ":" in rest:
+        hostname, port_str = rest.rsplit(":", 1)
+        port = int(port_str)
+    else:
+        hostname = rest
+        port = 1080
+
+    return {
+        "scheme": scheme,
+        "hostname": hostname,
+        "port": port,
+        "username": username,
+        "password": password,
+    }
+
+
 def get_client(acc) -> Client:
     acc_id = acc["id"]
     if acc_id not in _clients:
+        proxy = _parse_proxy(acc.get("proxy"))
         _clients[acc_id] = Client(
             name=_get_session_path(acc_id),
             api_id=acc["api_id"],
             api_hash=acc["api_hash"],
             phone_number=acc["phone"],
+            proxy=proxy,
         )
     return _clients[acc_id]
 

@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from pyrogram.errors import FloodWait, PeerFlood, UserBannedInChannel
 from db.database import execute, fetch_one, fetch_all, execute_returning
 from services.account_manager import ensure_connected
+from services.spintax import spin
 
 logger = logging.getLogger(__name__)
 
@@ -85,10 +86,11 @@ async def _send_comment(account, channel, message, camp):
             if not post.id:
                 break
 
-            # Отправляем комментарий к посту
+            # Обрабатываем spintax и отправляем комментарий
+            comment_text = spin(message["text"])
             await client.send_message(
                 chat_id=f"@{channel['username']}",
-                text=message["text"],
+                text=comment_text,
                 reply_to_message_id=post.id,
             )
 
