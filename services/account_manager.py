@@ -140,6 +140,19 @@ async def import_session_file(file_path: str, api_id: int, api_hash: str,
         dest = _get_session_path(acc_id) + ".session"
         shutil.copy2(file_path, dest)
 
+        # Убираем stale WAL/journal файлы и делаем checkpoint,
+        # чтобы Pyrogram не получил "database is locked"
+        for ext in ("-journal", "-wal", "-shm"):
+            lock_file = dest + ext
+            if os.path.exists(lock_file):
+                os.remove(lock_file)
+        try:
+            conn = sqlite3.connect(dest)
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            conn.close()
+        except Exception:
+            pass
+
         proxy = _parse_proxy(proxy_str)
         client = Client(
             name=_get_session_path(acc_id),
