@@ -3,7 +3,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 from pyrogram.errors import FloodWait, PeerFlood, UserBannedInChannel, AuthKeyUnregistered, UserDeactivated, UserDeactivatedBan
-from db.database import execute, fetch_one, fetch_all, execute_returning
+from db.database import execute, fetch_one, fetch_all, execute_returning, delete_account
 from services.account_manager import ensure_connected, disconnect
 from services.spintax import spin
 
@@ -118,7 +118,7 @@ async def _send_comment(account, channel, message, camp):
     except (AuthKeyUnregistered, UserDeactivated, UserDeactivatedBan) as e:
         logger.error(f"Аккаунт #{account['id']} мёртв ({type(e).__name__}), удаляю")
         await disconnect(account["id"])
-        await execute("DELETE FROM accounts WHERE id = ?", (account["id"],))
+        await delete_account(account["id"])
         await execute_returning(
             "INSERT INTO logs (account_id, channel_id, message_id, status, error) "
             "VALUES (?, ?, ?, 'error', ?)",

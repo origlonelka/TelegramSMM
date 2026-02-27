@@ -3,7 +3,7 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from db.database import execute, execute_returning, fetch_all, fetch_one
+from db.database import execute, execute_returning, fetch_all, fetch_one, delete_account
 from bot.keyboards.inline import (
     accounts_menu_kb, account_list_kb, account_item_kb,
     acc_confirm_del_kb, acc_add_method_kb, back_kb,
@@ -358,7 +358,7 @@ async def acc_session_proxy(message: Message, state: FSMContext):
     )
 
     if not result["ok"]:
-        await execute("DELETE FROM accounts WHERE id = ?", (acc_id,))
+        await delete_account(acc_id)
         await message.answer(
             f"❌ Ошибка импорта: {result['error']}",
             reply_markup=acc_add_method_kb(),
@@ -474,7 +474,7 @@ async def acc_file_proxy(message: Message, state: FSMContext):
         os.remove(tmp_path)
 
     if not result["ok"]:
-        await execute("DELETE FROM accounts WHERE id = ?", (acc_id,))
+        await delete_account(acc_id)
         await message.answer(
             f"❌ Ошибка импорта: {result['error']}",
             reply_markup=acc_add_method_kb(),
@@ -593,7 +593,7 @@ async def acc_tdata_proxy(message: Message, state: FSMContext):
         os.remove(zip_path)
 
     if not result["ok"]:
-        await execute("DELETE FROM accounts WHERE id = ?", (acc_id,))
+        await delete_account(acc_id)
         await message.answer(
             f"❌ Ошибка импорта tdata: {result['error']}",
             reply_markup=acc_add_method_kb(),
@@ -648,7 +648,7 @@ async def acc_check_all(callback: CallbackQuery):
         elif result.get("dead"):
             dead += 1
             deleted_phones.append(acc["phone"])
-            await execute("DELETE FROM accounts WHERE id = ?", (acc["id"],))
+            await delete_account(acc["id"])
             session_file = os.path.join("sessions", f"account_{acc['id']}.session")
             if os.path.exists(session_file):
                 os.remove(session_file)
@@ -705,7 +705,7 @@ async def acc_check(callback: CallbackQuery):
         )
     elif result.get("dead"):
         # Мёртвый аккаунт — удаляем
-        await execute("DELETE FROM accounts WHERE id = ?", (acc_id,))
+        await delete_account(acc_id)
         session_file = os.path.join("sessions", f"account_{acc_id}.session")
         if os.path.exists(session_file):
             os.remove(session_file)
@@ -733,7 +733,7 @@ async def acc_check(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("acc_del_confirm_"))
 async def acc_del_confirm(callback: CallbackQuery):
     acc_id = int(callback.data.split("_")[3])
-    await execute("DELETE FROM accounts WHERE id = ?", (acc_id,))
+    await delete_account(acc_id)
     await callback.message.edit_text(
         "✅ Аккаунт удалён.",
         reply_markup=accounts_menu_kb(),

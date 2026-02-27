@@ -51,6 +51,15 @@ async def fetch_all(query: str, params: tuple = ()):
     return await cursor.fetchall()
 
 
+async def delete_account(acc_id: int):
+    """Удаляет аккаунт и все его связи (campaign_accounts, logs)."""
+    db = await get_db()
+    await db.execute("DELETE FROM campaign_accounts WHERE account_id = ?", (acc_id,))
+    await db.execute("UPDATE logs SET account_id = NULL WHERE account_id = ?", (acc_id,))
+    await db.execute("DELETE FROM accounts WHERE id = ?", (acc_id,))
+    await db.commit()
+
+
 async def execute_returning(query: str, params: tuple = ()):
     db = await get_db()
     cursor = await db.execute(query, params)
