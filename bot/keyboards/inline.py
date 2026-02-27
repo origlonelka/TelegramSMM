@@ -508,6 +508,16 @@ def settings_menu_kb() -> InlineKeyboardMarkup:
 
 def stats_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📱 По аккаунтам", callback_data="stats_accounts"),
+         InlineKeyboardButton(text="📢 По каналам", callback_data="stats_channels")],
+        [InlineKeyboardButton(text="❌ Ошибки", callback_data="stats_errors"),
+         InlineKeyboardButton(text="📅 По дням", callback_data="stats_daily")],
         [InlineKeyboardButton(text="🔄 Обновить", callback_data="stats")],
         [InlineKeyboardButton(text="◀️ Главное меню", callback_data="back_main")],
+    ])
+
+
+def stats_sub_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="◀️ К статистике", callback_data="stats")],
     ])
