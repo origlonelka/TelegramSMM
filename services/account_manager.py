@@ -309,19 +309,37 @@ async def check_account(acc, timeout: int = 30) -> dict:
     """
     acc_id = acc["id"]
 
+    # 1. Проверяем наличие файла сессии
+    session_file = _get_session_path(acc_id) + ".session"
+    if not os.path.exists(session_file):
+        return {"ok": False, "dead": True, "error": "Файл сессии не найден"}
+
     async def _do_check():
-        client = get_client(acc)
-        if not client.is_connected:
-            await client.start()
-        me = await client.get_me()
-        phone = f"+{me.phone_number}" if me.phone_number else None
+        # Используем connect() вместо start() чтобы не попасть
+        # в интерактивную авторизацию (input() блокирует event loop)
+        proxy = _parse_proxy(acc["proxy"])
+        client = Client(
+            name=_get_session_path(acc_id),
+            api_id=acc["api_id"],
+            api_hash=acc["api_hash"],
+            proxy=proxy,
+        )
         try:
-            await client.stop()
+            await client.connect()
+            me = await client.get_me()
+            phone = f"+{me.phone_number}" if me.phone_number else None
+            await client.disconnect()
+            return {"ok": True, "phone": phone}
         except Exception:
-            pass
-        if acc_id in _clients:
-            del _clients[acc_id]
-        return {"ok": True, "phone": phone}
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+            raise
+
+    # Убираем старый клиент из кеша — проверка использует свой
+    if acc_id in _clients:
+        del _clients[acc_id]
 
     task = asyncio.create_task(_do_check())
     done, _ = await asyncio.wait({task}, timeout=timeout)
@@ -330,16 +348,12 @@ async def check_account(acc, timeout: int = 30) -> dict:
         try:
             return task.result()
         except Exception as e:
-            if acc_id in _clients:
-                del _clients[acc_id]
             err = str(e)
             dead = _is_dead_error(err)
             return {"ok": False, "dead": dead, "error": err}
     else:
         # Таймаут — бросаем задачу, не ждём отмены
         task.cancel()
-        if acc_id in _clients:
-            del _clients[acc_id]
         return {
             "ok": False,
             "dead": False,
