@@ -23,7 +23,8 @@ def back_kb(to: str = "main") -> InlineKeyboardMarkup:
 
 def accounts_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Добавить аккаунт", callback_data="acc_add")],
+        [InlineKeyboardButton(text="➕ Добавить аккаунт", callback_data="acc_add"),
+         InlineKeyboardButton(text="🤖 Авторег", callback_data="autoreg")],
         [InlineKeyboardButton(text="📋 Список аккаунтов", callback_data="acc_list")],
         [InlineKeyboardButton(text="🔍 Проверить все", callback_data="acc_check_all")],
         [InlineKeyboardButton(text="👤 Шаблоны профиля", callback_data="acc_setup"),
@@ -413,6 +414,33 @@ def prs_confirm_del_kb(prs_id: int) -> InlineKeyboardMarkup:
          InlineKeyboardButton(
             text="❌ Отмена", callback_data=f"prs_view_{prs_id}")],
     ])
+
+
+# --- Авторегистрация ---
+
+def autoreg_menu_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔑 SMS API ключ", callback_data="areg_set_key"),
+         InlineKeyboardButton(text="💰 Баланс", callback_data="areg_balance")],
+        [InlineKeyboardButton(text="🌍 Страна", callback_data="areg_country"),
+         InlineKeyboardButton(text="🔢 Количество", callback_data="areg_count")],
+        [InlineKeyboardButton(text="▶️ Запустить авторег", callback_data="areg_start")],
+        [InlineKeyboardButton(text="◀️ К аккаунтам", callback_data="accounts")],
+    ])
+
+
+def autoreg_country_kb(current_country: int) -> InlineKeyboardMarkup:
+    from services.autoreg import COUNTRIES
+    buttons = []
+    for code, name in COUNTRIES.items():
+        check = "✅ " if code == current_country else ""
+        buttons.append([InlineKeyboardButton(
+            text=f"{check}{name}",
+            callback_data=f"areg_setcountry_{code}"
+        )])
+    buttons.append([InlineKeyboardButton(
+        text="◀️ Назад", callback_data="autoreg")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 # --- Прокси-пул ---
