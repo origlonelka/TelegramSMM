@@ -3,7 +3,7 @@ from aiogram.filters import CommandStart
 from aiogram.types import Message, CallbackQuery
 
 from bot.keyboards.inline import main_menu_kb, paywall_kb
-from db.database import fetch_one
+from db.database import execute, fetch_one
 from services.user_manager import get_or_create_user, start_trial, check_entitlement
 
 router = Router()
@@ -29,6 +29,30 @@ async def _is_admin(user_id: int) -> bool:
 async def cmd_start(message: Message):
     user = message.from_user
     db_user = await get_or_create_user(user.id, user.username, user.first_name)
+
+    # Handle referral deep link: /start ref_12345
+    args = message.text.split(maxsplit=1)
+    if len(args) > 1 and args[1].startswith("ref_"):
+        try:
+            referrer_id = int(args[1][4:])
+            if referrer_id != user.id:
+                # Only track if user is new and not already referred
+                existing_ref = await fetch_one(
+                    "SELECT 1 FROM referrals WHERE referred_telegram_id = ?",
+                    (user.id,))
+                if not existing_ref and db_user["status"] == "new":
+                    await execute(
+                        "INSERT OR IGNORE INTO referrals "
+                        "(referrer_telegram_id, referred_telegram_id) "
+                        "VALUES (?, ?)",
+                        (referrer_id, user.id))
+                    await execute(
+                        "UPDATE users SET referrer_telegram_id = ? "
+                        "WHERE telegram_id = ?",
+                        (referrer_id, user.id))
+        except (ValueError, IndexError):
+            pass
+
     is_admin = await _is_admin(user.id)
 
     # Admins always get full menu

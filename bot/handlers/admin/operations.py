@@ -1,6 +1,8 @@
-"""Admin dashboards: users, finance, operations."""
+"""Admin dashboards: users, finance, operations, YooKassa settings."""
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from db.database import fetch_one, fetch_all
 
 router = Router()
@@ -17,6 +19,7 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
          InlineKeyboardButton(text="🎟 Промокоды", callback_data="adm_promos")],
         [InlineKeyboardButton(text="🎫 Тикеты", callback_data="adm_tickets"),
          InlineKeyboardButton(text="📋 Аудит", callback_data="adm_audit")],
+        [InlineKeyboardButton(text="💵 YooKassa", callback_data="adm_yookassa")],
         [InlineKeyboardButton(text="◀️ Главное меню", callback_data="back_main")],
     ])
 
@@ -124,6 +127,39 @@ async def dash_ops(callback: CallbackQuery):
         f"📈 Успешность: {success_rate}%\n\n"
         f"🚀 Активных кампаний: {active_camps['c']}\n"
         f"📱 Активных аккаунтов: {active_accs['c']}"
+    )
+    await callback.message.edit_text(
+        text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="adm_back")],
+        ]), parse_mode="HTML")
+    await callback.answer()
+
+
+# --- YooKassa settings (superadmin only) ---
+
+@router.callback_query(F.data == "adm_yookassa")
+async def yookassa_settings(callback: CallbackQuery, admin: dict):
+    if admin["role"] != "superadmin":
+        await callback.answer("Только для суперадминов", show_alert=True)
+        return
+
+    from core.config import YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY, WEBHOOK_PORT, WEBHOOK_SECRET, BOT_URL
+
+    shop_status = "✅ Установлен" if YOOKASSA_SHOP_ID else "❌ Не установлен"
+    key_status = "✅ Установлен" if YOOKASSA_SECRET_KEY else "❌ Не установлен"
+    key_preview = YOOKASSA_SECRET_KEY[:8] + "..." if YOOKASSA_SECRET_KEY else "—"
+
+    text = (
+        "💵 <b>Настройки YooKassa</b>\n\n"
+        f"Shop ID: {shop_status}\n"
+        f"  <code>{YOOKASSA_SHOP_ID or '—'}</code>\n\n"
+        f"Secret Key: {key_status}\n"
+        f"  <code>{key_preview}</code>\n\n"
+        f"Webhook порт: <code>{WEBHOOK_PORT}</code>\n"
+        f"Webhook secret: <code>{'***' if WEBHOOK_SECRET else '—'}</code>\n"
+        f"Bot URL: <code>{BOT_URL or '—'}</code>\n\n"
+        "Для изменения отредактируйте файл <code>.env</code> "
+        "и перезапустите бота."
     )
     await callback.message.edit_text(
         text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[

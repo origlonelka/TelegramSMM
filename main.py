@@ -11,7 +11,7 @@ from core.scheduler import start_scheduler
 from bot.middlewares.access import UserAccessMiddleware
 from core.webhook_server import create_webhook_app, set_bot
 
-from bot.handlers import start, accounts, channels, messages, campaigns, settings, account_setup, presets, proxies, autoreg, payments, promo_chats
+from bot.handlers import start, accounts, channels, messages, campaigns, settings, account_setup, presets, proxies, autoreg, payments, promo_chats, account_info
 from bot.handlers.admin import admin_router
 
 logging.basicConfig(
@@ -33,8 +33,9 @@ async def main():
     # /start — без middleware (обрабатывает trial/paywall сам)
     dp.include_router(start.router)
 
-    # Платежи — без middleware (пользователи без подписки должны иметь доступ)
+    # Платежи и аккаунт — без middleware (пользователи без подписки должны иметь доступ)
     dp.include_router(payments.router)
+    dp.include_router(account_info.router)
 
     # Админ-панель — с AdminMiddleware (проверяет роль)
     dp.include_router(admin_router)

@@ -174,6 +174,9 @@ async def process_webhook(yookassa_payment_id: str) -> dict:
         (user_tg_id,)
     )
 
+    # Referral bonus: give 7 days to referrer on first payment
+    await _give_referral_bonus(user_tg_id)
+
     return {
         "ok": True,
         "already_processed": False,
@@ -218,6 +221,62 @@ async def check_payment_status(payment_uuid: str) -> dict:
         return {"status": "cancelled", "paid": False}
     else:
         return {"status": yp.status, "paid": False}
+
+
+REFERRAL_BONUS_DAYS = 7
+
+
+async def _give_referral_bonus(user_tg_id: int):
+    """Give bonus days to referrer when referred user makes first payment."""
+    ref = await fetch_one(
+        "SELECT * FROM referrals WHERE referred_telegram_id = ? AND bonus_days = 0",
+        (user_tg_id,))
+    if not ref:
+        return
+
+    referrer_id = ref["referrer_telegram_id"]
+    # Mark bonus as given
+    await execute(
+        "UPDATE referrals SET bonus_days = ? WHERE id = ?",
+        (REFERRAL_BONUS_DAYS, ref["id"]))
+
+    # Extend referrer's subscription or create a bonus one
+    current_sub = await fetch_one(
+        "SELECT expires_at FROM subscriptions "
+        "WHERE user_telegram_id = ? AND status = 'succeeded' "
+        "AND expires_at > datetime('now') "
+        "ORDER BY expires_at DESC LIMIT 1",
+        (referrer_id,))
+
+    if current_sub:
+        # Extend existing subscription
+        await execute(
+            "UPDATE subscriptions SET "
+            "expires_at = datetime(expires_at, '+' || ? || ' days') "
+            "WHERE user_telegram_id = ? AND status = 'succeeded' "
+            "AND expires_at > datetime('now') "
+            "ORDER BY expires_at DESC LIMIT 1",
+            (REFERRAL_BONUS_DAYS, referrer_id))
+    else:
+        # Give free access by updating user status and trial
+        referrer = await fetch_one(
+            "SELECT * FROM users WHERE telegram_id = ?", (referrer_id,))
+        if referrer:
+            await execute(
+                "UPDATE users SET status = 'subscription_active', "
+                "updated_at = datetime('now') WHERE telegram_id = ?",
+                (referrer_id,))
+            # Create a bonus subscription record
+            await execute(
+                "INSERT INTO subscriptions "
+                "(user_telegram_id, plan_id, payment_id, status, amount_rub, "
+                "started_at, expires_at) "
+                "VALUES (?, 1, 'referral_bonus_' || ?, 'succeeded', 0, "
+                "datetime('now'), datetime('now', '+' || ? || ' days'))",
+                (referrer_id, user_tg_id, REFERRAL_BONUS_DAYS))
+
+    logger.info(f"Referral bonus: {REFERRAL_BONUS_DAYS} days to {referrer_id} "
+                f"from {user_tg_id}")
 
 
 async def expire_subscriptions():

@@ -35,33 +35,22 @@ def user_info_kb(tg_id: int, status: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-@router.callback_query(F.data == "adm_users")
-async def users_menu(callback: CallbackQuery, admin: dict):
+@router.callback_query(F.data.in_({"adm_users", "adm_user_search"}))
+async def users_menu(callback: CallbackQuery, state: FSMContext, admin: dict):
     if not _check_role(admin, "admin"):
         await callback.answer("Недостаточно прав", show_alert=True)
         return
+    await state.set_state(SearchUser.query)
     total = await fetch_one("SELECT COUNT(*) as c FROM users")
     text = (
         "👤 <b>Управление пользователями</b>\n\n"
         f"Всего пользователей: {total['c']}\n\n"
-        "Введите Telegram ID или @username для поиска:"
+        "🔍 Введите Telegram ID или @username для поиска:"
     )
     await callback.message.edit_text(
         text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔍 Поиск", callback_data="adm_user_search")],
             [InlineKeyboardButton(text="◀️ Назад", callback_data="adm_back")],
         ]), parse_mode="HTML")
-    await callback.answer()
-
-
-@router.callback_query(F.data == "adm_user_search")
-async def user_search_start(callback: CallbackQuery, state: FSMContext):
-    await state.set_state(SearchUser.query)
-    await callback.message.edit_text(
-        "🔍 Введите Telegram ID или @username:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="◀️ Отмена", callback_data="adm_users")],
-        ]))
     await callback.answer()
 
 

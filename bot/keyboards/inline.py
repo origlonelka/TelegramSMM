@@ -11,6 +11,7 @@ def main_menu_kb(is_admin: bool = False) -> InlineKeyboardMarkup:
          InlineKeyboardButton(text="📣 Промо-чаты", callback_data="promo_chats")],
         [InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings"),
          InlineKeyboardButton(text="📊 Статистика", callback_data="stats")],
+        [InlineKeyboardButton(text="👤 Мой аккаунт", callback_data="my_account")],
     ]
     if is_admin:
         buttons.append([InlineKeyboardButton(
@@ -569,7 +570,6 @@ def prx_confirm_del_kb(prx_id: int) -> InlineKeyboardMarkup:
 
 def settings_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔑 API настройки", callback_data="settings_api")],
         [InlineKeyboardButton(text="🔄 Сбросить лимиты", callback_data="settings_reset_limits")],
         [InlineKeyboardButton(text="◀️ Главное меню", callback_data="back_main")],
     ])
