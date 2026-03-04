@@ -86,3 +86,7 @@ async def activate_trial(callback: CallbackQuery):
     await callback.answer()
 
 
+@router.callback_query(F.data == "admin_panel")
+async def admin_panel(callback: CallbackQuery):
+    await callback.answer(
+        "Админ-панель будет доступна в ближайшее время", show_alert=True)
