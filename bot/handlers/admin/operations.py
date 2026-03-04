@@ -101,13 +101,13 @@ async def dash_finance(callback: CallbackQuery):
 async def dash_ops(callback: CallbackQuery):
     errors_24h = await fetch_one(
         "SELECT COUNT(*) as c FROM logs WHERE status = 'error' "
-        "AND created_at >= datetime('now', '-24 hours')")
+        "AND sent_at >= datetime('now', '-24 hours')")
     sent_24h = await fetch_one(
         "SELECT COUNT(*) as c FROM logs WHERE status = 'sent' "
-        "AND created_at >= datetime('now', '-24 hours')")
+        "AND sent_at >= datetime('now', '-24 hours')")
     flood_24h = await fetch_one(
-        "SELECT COUNT(*) as c FROM logs WHERE error_text LIKE '%FloodWait%' "
-        "AND created_at >= datetime('now', '-24 hours')")
+        "SELECT COUNT(*) as c FROM logs WHERE error LIKE '%FloodWait%' "
+        "AND sent_at >= datetime('now', '-24 hours')")
     active_camps = await fetch_one(
         "SELECT COUNT(*) as c FROM campaigns WHERE is_active = 1")
     active_accs = await fetch_one(

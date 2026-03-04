@@ -63,11 +63,31 @@ async def cmd_start(message: Message):
 
 @router.callback_query(F.data == "back_main")
 async def back_to_main(callback: CallbackQuery):
-    is_admin = await _is_admin(callback.from_user.id)
-    await callback.message.edit_text(
-        WELCOME_TEXT,
-        reply_markup=main_menu_kb(is_admin=is_admin),
-        parse_mode="HTML")
+    user_id = callback.from_user.id
+    is_admin = await _is_admin(user_id)
+
+    if is_admin:
+        await callback.message.edit_text(
+            WELCOME_TEXT,
+            reply_markup=main_menu_kb(is_admin=True),
+            parse_mode="HTML")
+        await callback.answer()
+        return
+
+    ent = await check_entitlement(user_id)
+    if ent["allowed"]:
+        await callback.message.edit_text(
+            WELCOME_TEXT,
+            reply_markup=main_menu_kb(),
+            parse_mode="HTML")
+    else:
+        db_user = await get_or_create_user(
+            user_id, callback.from_user.username, callback.from_user.first_name)
+        await callback.message.edit_text(
+            "🤖 <b>TelegramSMM</b>\n\n"
+            "Ваш доступ истёк. Выберите тариф для продолжения:",
+            reply_markup=paywall_kb(show_trial=db_user["status"] == "new"),
+            parse_mode="HTML")
     await callback.answer()
 
 
