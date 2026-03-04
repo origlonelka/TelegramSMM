@@ -1,5 +1,5 @@
 import aiosqlite
-from core.config import DB_PATH
+from core.config import DB_PATH, SUPERADMIN_IDS
 from db.models import SCHEMA
 
 _db: aiosqlite.Connection | None = None
@@ -19,19 +19,16 @@ async def get_db() -> aiosqlite.Connection:
 async def init_db():
     db = await get_db()
     await db.executescript(SCHEMA)
-    # Миграции
-    for migration in [
-        "ALTER TABLE accounts ADD COLUMN proxy TEXT",
-        "ALTER TABLE campaigns ADD COLUMN mode TEXT DEFAULT 'comments'",
-        "ALTER TABLE logs ADD COLUMN mode TEXT",
-        "ALTER TABLE logs ADD COLUMN target_user_id INTEGER",
-        "ALTER TABLE logs ADD COLUMN campaign_id INTEGER REFERENCES campaigns(id)",
-    ]:
-        try:
-            await db.execute(migration)
-        except Exception:
-            pass  # колонка уже существует
-    # Миграция: убираем режим CTA, заменяем на comments
+
+    # Versioned migrations
+    from db.migrations import run_migrations, seed_superadmins
+    await run_migrations(db)
+
+    # Seed superadmins from .env on every startup
+    if SUPERADMIN_IDS:
+        await seed_superadmins(db, SUPERADMIN_IDS)
+
+    # One-time data fix: CTA → comments
     for fix in [
         "UPDATE campaigns SET mode = 'comments' WHERE mode = 'comments_cta'",
         "UPDATE presets SET mode = 'comments' WHERE mode = 'comments_cta'",
@@ -69,13 +66,9 @@ async def fetch_all(query: str, params: tuple = ()):
 
 
 async def delete_account(acc_id: int):
-    """Удаляет аккаунт и все его связи (campaign_accounts, logs, proxies)."""
-    db = await get_db()
-    await db.execute("DELETE FROM campaign_accounts WHERE account_id = ?", (acc_id,))
-    await db.execute("UPDATE logs SET account_id = NULL WHERE account_id = ?", (acc_id,))
-    await db.execute("UPDATE proxies SET account_id = NULL WHERE account_id = ?", (acc_id,))
-    await db.execute("DELETE FROM accounts WHERE id = ?", (acc_id,))
-    await db.commit()
+    """Удаляет аккаунт и все его связи. Prefer hard_delete_account() from account_manager."""
+    from services.account_manager import hard_delete_account
+    await hard_delete_account(acc_id)
 
 
 async def execute_returning(query: str, params: tuple = ()):

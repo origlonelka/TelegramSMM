@@ -1,8 +1,8 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 
-def main_menu_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
+def main_menu_kb(is_admin: bool = False) -> InlineKeyboardMarkup:
+    buttons = [
         [InlineKeyboardButton(text="📱 Аккаунты", callback_data="accounts"),
          InlineKeyboardButton(text="📢 Каналы", callback_data="channels")],
         [InlineKeyboardButton(text="💬 Сообщения", callback_data="messages"),
@@ -10,7 +10,22 @@ def main_menu_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📦 Пресеты", callback_data="presets")],
         [InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings"),
          InlineKeyboardButton(text="📊 Статистика", callback_data="stats")],
-    ])
+    ]
+    if is_admin:
+        buttons.append([InlineKeyboardButton(
+            text="🛠 Админ-панель", callback_data="admin_panel")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def paywall_kb(show_trial: bool = False) -> InlineKeyboardMarkup:
+    buttons = []
+    if show_trial:
+        buttons.append([InlineKeyboardButton(
+            text="🎁 Попробовать бесплатно (24ч)",
+            callback_data="activate_trial")])
+    buttons.append([InlineKeyboardButton(
+        text="💳 Выбрать тариф", callback_data="select_plan")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def back_kb(to: str = "main") -> InlineKeyboardMarkup:

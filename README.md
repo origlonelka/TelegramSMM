@@ -70,8 +70,7 @@ nano .env
 | Переменная | Описание |
 |---|---|
 | `BOT_TOKEN` | Токен бота от @BotFather |
-| `ADMIN_IDS` | ID администраторов через запятую |
-| `ADMIN_USERNAMES` | Юзернеймы администраторов через запятую |
+| `ADMIN_IDS` | ID администраторов через запятую (superadmin) |
 | `API_ID` | API ID от my.telegram.org |
 | `API_HASH` | API Hash от my.telegram.org |
 

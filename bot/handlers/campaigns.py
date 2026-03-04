@@ -23,9 +23,11 @@ class SetLimit(StatesGroup):
 # --- Меню кампаний ---
 
 @router.callback_query(F.data.in_({"campaigns", "back_campaigns"}))
-async def campaigns_menu(callback: CallbackQuery, state: FSMContext):
+async def campaigns_menu(callback: CallbackQuery, state: FSMContext, db_user: dict):
     await state.clear()
-    count = await fetch_one("SELECT COUNT(*) as cnt FROM campaigns")
+    count = await fetch_one(
+        "SELECT COUNT(*) as cnt FROM campaigns WHERE owner_user_id = ?",
+        (db_user["telegram_id"],))
     text = f"🚀 <b>Кампании</b>\n\nВсего: {count['cnt']}"
     await callback.message.edit_text(text, reply_markup=campaigns_menu_kb(), parse_mode="HTML")
     await callback.answer()
@@ -34,8 +36,10 @@ async def campaigns_menu(callback: CallbackQuery, state: FSMContext):
 # --- Список ---
 
 @router.callback_query(F.data == "camp_list")
-async def camp_list(callback: CallbackQuery):
-    campaigns = await fetch_all("SELECT id, name, is_active FROM campaigns ORDER BY id")
+async def camp_list(callback: CallbackQuery, db_user: dict):
+    campaigns = await fetch_all(
+        "SELECT id, name, is_active FROM campaigns WHERE owner_user_id = ? ORDER BY id",
+        (db_user["telegram_id"],))
     if not campaigns:
         await callback.answer("Список пуст", show_alert=True)
         return
@@ -50,9 +54,11 @@ async def camp_list(callback: CallbackQuery):
 # --- Просмотр ---
 
 @router.callback_query(F.data.startswith("camp_view_"))
-async def camp_view(callback: CallbackQuery):
+async def camp_view(callback: CallbackQuery, db_user: dict):
     camp_id = int(callback.data.split("_")[2])
-    camp = await fetch_one("SELECT * FROM campaigns WHERE id = ?", (camp_id,))
+    camp = await fetch_one(
+        "SELECT * FROM campaigns WHERE id = ? AND owner_user_id = ?",
+        (camp_id, db_user["telegram_id"]))
     if not camp:
         await callback.answer("Кампания не найдена", show_alert=True)
         return
@@ -100,11 +106,12 @@ async def camp_add_start(callback: CallbackQuery, state: FSMContext):
 
 
 @router.message(AddCampaign.name)
-async def camp_add_name(message: Message, state: FSMContext):
+async def camp_add_name(message: Message, state: FSMContext, db_user: dict):
     name = message.text.strip()
     await state.clear()
     camp_id = await execute_returning(
-        "INSERT INTO campaigns (name) VALUES (?)", (name,)
+        "INSERT INTO campaigns (name, owner_user_id) VALUES (?, ?)",
+        (name, db_user["telegram_id"]),
     )
     await message.answer(
         f"✅ Кампания «{name}» создана (#{camp_id}).\n"
@@ -116,9 +123,14 @@ async def camp_add_name(message: Message, state: FSMContext):
 # --- Вкл/Выкл ---
 
 @router.callback_query(F.data.startswith("camp_toggle_"))
-async def camp_toggle(callback: CallbackQuery):
+async def camp_toggle(callback: CallbackQuery, db_user: dict):
     camp_id = int(callback.data.split("_")[2])
-    camp = await fetch_one("SELECT is_active FROM campaigns WHERE id = ?", (camp_id,))
+    camp = await fetch_one(
+        "SELECT is_active FROM campaigns WHERE id = ? AND owner_user_id = ?",
+        (camp_id, db_user["telegram_id"]))
+    if not camp:
+        await callback.answer("Кампания не найдена", show_alert=True)
+        return
     new_status = 0 if camp["is_active"] else 1
     await execute("UPDATE campaigns SET is_active = ? WHERE id = ?", (new_status, camp_id))
     await callback.answer("✅ Статус изменён")
@@ -155,9 +167,11 @@ async def camp_toggle(callback: CallbackQuery):
 # --- Режим кампании ---
 
 @router.callback_query(F.data.startswith("camp_mode_"))
-async def camp_mode(callback: CallbackQuery):
+async def camp_mode(callback: CallbackQuery, db_user: dict):
     camp_id = int(callback.data.split("_")[2])
-    camp = await fetch_one("SELECT * FROM campaigns WHERE id = ?", (camp_id,))
+    camp = await fetch_one(
+        "SELECT * FROM campaigns WHERE id = ? AND owner_user_id = ?",
+        (camp_id, db_user["telegram_id"]))
     if not camp:
         await callback.answer("Кампания не найдена", show_alert=True)
         return
@@ -174,13 +188,15 @@ async def camp_mode(callback: CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("camp_setmode_"))
-async def camp_setmode(callback: CallbackQuery):
+async def camp_setmode(callback: CallbackQuery, db_user: dict):
     parts = callback.data.split("_")
     camp_id = int(parts[2])
     toggled_mode = "_".join(parts[3:])
 
     # Мультивыбор: переключаем режим вкл/выкл
-    camp = await fetch_one("SELECT mode FROM campaigns WHERE id = ?", (camp_id,))
+    camp = await fetch_one(
+        "SELECT mode FROM campaigns WHERE id = ? AND owner_user_id = ?",
+        (camp_id, db_user["telegram_id"]))
     current_modes = set((camp["mode"] or "comments").split(","))
 
     if toggled_mode in current_modes:
@@ -207,9 +223,11 @@ async def camp_setmode(callback: CallbackQuery):
 # --- Привязка каналов ---
 
 @router.callback_query(F.data.startswith("camp_channels_"))
-async def camp_channels(callback: CallbackQuery):
+async def camp_channels(callback: CallbackQuery, db_user: dict):
     camp_id = int(callback.data.split("_")[2])
-    channels = await fetch_all("SELECT id, username FROM channels ORDER BY id")
+    channels = await fetch_all(
+        "SELECT id, username FROM channels WHERE owner_user_id = ? ORDER BY id",
+        (db_user["telegram_id"],))
     linked = await fetch_all(
         "SELECT channel_id FROM campaign_channels WHERE campaign_id = ?", (camp_id,))
     selected_ids = {r["channel_id"] for r in linked}
@@ -226,7 +244,7 @@ async def camp_channels(callback: CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("camp_ch_toggle_"))
-async def camp_ch_toggle(callback: CallbackQuery):
+async def camp_ch_toggle(callback: CallbackQuery, db_user: dict):
     parts = callback.data.split("_")
     camp_id = int(parts[3])
     ch_id = int(parts[4])
@@ -243,7 +261,9 @@ async def camp_ch_toggle(callback: CallbackQuery):
             "INSERT INTO campaign_channels (campaign_id, channel_id) VALUES (?, ?)",
             (camp_id, ch_id))
 
-    channels = await fetch_all("SELECT id, username FROM channels ORDER BY id")
+    channels = await fetch_all(
+        "SELECT id, username FROM channels WHERE owner_user_id = ? ORDER BY id",
+        (db_user["telegram_id"],))
     linked = await fetch_all(
         "SELECT channel_id FROM campaign_channels WHERE campaign_id = ?", (camp_id,))
     selected_ids = {r["channel_id"] for r in linked}
@@ -256,9 +276,11 @@ async def camp_ch_toggle(callback: CallbackQuery):
 # --- Привязка аккаунтов ---
 
 @router.callback_query(F.data.startswith("camp_accounts_"))
-async def camp_accounts(callback: CallbackQuery):
+async def camp_accounts(callback: CallbackQuery, db_user: dict):
     camp_id = int(callback.data.split("_")[2])
-    accounts = await fetch_all("SELECT id, phone FROM accounts WHERE status = 'active' ORDER BY id")
+    accounts = await fetch_all(
+        "SELECT id, phone FROM accounts WHERE status = 'active' AND owner_user_id = ? ORDER BY id",
+        (db_user["telegram_id"],))
     linked = await fetch_all(
         "SELECT account_id FROM campaign_accounts WHERE campaign_id = ?", (camp_id,))
     selected_ids = {r["account_id"] for r in linked}
@@ -275,7 +297,7 @@ async def camp_accounts(callback: CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("camp_acc_toggle_"))
-async def camp_acc_toggle(callback: CallbackQuery):
+async def camp_acc_toggle(callback: CallbackQuery, db_user: dict):
     parts = callback.data.split("_")
     camp_id = int(parts[3])
     acc_id = int(parts[4])
@@ -292,7 +314,9 @@ async def camp_acc_toggle(callback: CallbackQuery):
             "INSERT INTO campaign_accounts (campaign_id, account_id) VALUES (?, ?)",
             (camp_id, acc_id))
 
-    accounts = await fetch_all("SELECT id, phone FROM accounts WHERE status = 'active' ORDER BY id")
+    accounts = await fetch_all(
+        "SELECT id, phone FROM accounts WHERE status = 'active' AND owner_user_id = ? ORDER BY id",
+        (db_user["telegram_id"],))
     linked = await fetch_all(
         "SELECT account_id FROM campaign_accounts WHERE campaign_id = ?", (camp_id,))
     selected_ids = {r["account_id"] for r in linked}
@@ -305,9 +329,11 @@ async def camp_acc_toggle(callback: CallbackQuery):
 # --- Привязка сообщений ---
 
 @router.callback_query(F.data.startswith("camp_messages_"))
-async def camp_messages(callback: CallbackQuery):
+async def camp_messages(callback: CallbackQuery, db_user: dict):
     camp_id = int(callback.data.split("_")[2])
-    messages = await fetch_all("SELECT id, text FROM messages WHERE is_active = 1 ORDER BY id")
+    messages = await fetch_all(
+        "SELECT id, text FROM messages WHERE is_active = 1 AND owner_user_id = ? ORDER BY id",
+        (db_user["telegram_id"],))
     linked = await fetch_all(
         "SELECT message_id FROM campaign_messages WHERE campaign_id = ?", (camp_id,))
     selected_ids = {r["message_id"] for r in linked}
@@ -324,7 +350,7 @@ async def camp_messages(callback: CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("camp_msg_toggle_"))
-async def camp_msg_toggle(callback: CallbackQuery):
+async def camp_msg_toggle(callback: CallbackQuery, db_user: dict):
     parts = callback.data.split("_")
     camp_id = int(parts[3])
     msg_id = int(parts[4])
@@ -341,7 +367,9 @@ async def camp_msg_toggle(callback: CallbackQuery):
             "INSERT INTO campaign_messages (campaign_id, message_id) VALUES (?, ?)",
             (camp_id, msg_id))
 
-    messages = await fetch_all("SELECT id, text FROM messages WHERE is_active = 1 ORDER BY id")
+    messages = await fetch_all(
+        "SELECT id, text FROM messages WHERE is_active = 1 AND owner_user_id = ? ORDER BY id",
+        (db_user["telegram_id"],))
     linked = await fetch_all(
         "SELECT message_id FROM campaign_messages WHERE campaign_id = ?", (camp_id,))
     selected_ids = {r["message_id"] for r in linked}
@@ -354,9 +382,11 @@ async def camp_msg_toggle(callback: CallbackQuery):
 # --- Лимиты ---
 
 @router.callback_query(F.data.startswith("camp_limits_"))
-async def camp_limits(callback: CallbackQuery):
+async def camp_limits(callback: CallbackQuery, db_user: dict):
     camp_id = int(callback.data.split("_")[2])
-    camp = await fetch_one("SELECT * FROM campaigns WHERE id = ?", (camp_id,))
+    camp = await fetch_one(
+        "SELECT * FROM campaigns WHERE id = ? AND owner_user_id = ?",
+        (camp_id, db_user["telegram_id"]))
     text = (
         f"⚙️ <b>Лимиты кампании «{camp['name']}»</b>\n\n"
         f"⏱ Мин. задержка: {camp['delay_min']} сек\n"
@@ -390,7 +420,7 @@ async def camp_set_limit(callback: CallbackQuery, state: FSMContext):
 
 
 @router.message(SetLimit.value)
-async def camp_set_limit_value(message: Message, state: FSMContext):
+async def camp_set_limit_value(message: Message, state: FSMContext, db_user: dict):
     if not message.text.strip().isdigit():
         await message.answer("❌ Введите число:")
         return
@@ -399,8 +429,8 @@ async def camp_set_limit_value(message: Message, state: FSMContext):
     await state.clear()
 
     await execute(
-        f"UPDATE campaigns SET {data['db_field']} = ? WHERE id = ?",
-        (value, data["camp_id"]),
+        f"UPDATE campaigns SET {data['db_field']} = ? WHERE id = ? AND owner_user_id = ?",
+        (value, data["camp_id"], db_user["telegram_id"]),
     )
     await message.answer(
         f"✅ Значение обновлено.",
@@ -411,8 +441,14 @@ async def camp_set_limit_value(message: Message, state: FSMContext):
 # --- Удаление ---
 
 @router.callback_query(F.data.startswith("camp_del_confirm_"))
-async def camp_del_confirm(callback: CallbackQuery):
+async def camp_del_confirm(callback: CallbackQuery, db_user: dict):
     camp_id = int(callback.data.split("_")[3])
+    camp = await fetch_one(
+        "SELECT id FROM campaigns WHERE id = ? AND owner_user_id = ?",
+        (camp_id, db_user["telegram_id"]))
+    if not camp:
+        await callback.answer("Кампания не найдена", show_alert=True)
+        return
     await execute("UPDATE logs SET campaign_id = NULL WHERE campaign_id = ?", (camp_id,))
     await execute("DELETE FROM campaign_channels WHERE campaign_id = ?", (camp_id,))
     await execute("DELETE FROM campaign_accounts WHERE campaign_id = ?", (camp_id,))
@@ -423,9 +459,11 @@ async def camp_del_confirm(callback: CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("camp_del_"))
-async def camp_del(callback: CallbackQuery):
+async def camp_del(callback: CallbackQuery, db_user: dict):
     camp_id = int(callback.data.split("_")[2])
-    camp = await fetch_one("SELECT name FROM campaigns WHERE id = ?", (camp_id,))
+    camp = await fetch_one(
+        "SELECT name FROM campaigns WHERE id = ? AND owner_user_id = ?",
+        (camp_id, db_user["telegram_id"]))
     if not camp:
         await callback.answer("Кампания не найдена", show_alert=True)
         return

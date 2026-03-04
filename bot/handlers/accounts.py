@@ -67,9 +67,11 @@ class EditProxy(StatesGroup):
 # --- Меню аккаунтов ---
 
 @router.callback_query(F.data.in_({"accounts", "back_accounts"}))
-async def accounts_menu(callback: CallbackQuery, state: FSMContext):
+async def accounts_menu(callback: CallbackQuery, state: FSMContext, db_user: dict):
     await state.clear()
-    count = await fetch_one("SELECT COUNT(*) as cnt FROM accounts")
+    count = await fetch_one(
+        "SELECT COUNT(*) as cnt FROM accounts WHERE owner_user_id = ?",
+        (db_user["telegram_id"],))
     text = f"📱 <b>Аккаунты</b>\n\nВсего: {count['cnt']}"
     await callback.message.edit_text(text, reply_markup=accounts_menu_kb(), parse_mode="HTML")
     await callback.answer()
@@ -78,8 +80,10 @@ async def accounts_menu(callback: CallbackQuery, state: FSMContext):
 # --- Список ---
 
 @router.callback_query(F.data == "acc_list")
-async def acc_list(callback: CallbackQuery):
-    accounts = await fetch_all("SELECT id, phone, status FROM accounts ORDER BY id")
+async def acc_list(callback: CallbackQuery, db_user: dict):
+    accounts = await fetch_all(
+        "SELECT id, phone, status FROM accounts WHERE owner_user_id = ? ORDER BY id",
+        (db_user["telegram_id"],))
     if not accounts:
         await callback.answer("Список пуст", show_alert=True)
         return
@@ -94,9 +98,11 @@ async def acc_list(callback: CallbackQuery):
 # --- Просмотр аккаунта ---
 
 @router.callback_query(F.data.startswith("acc_view_"))
-async def acc_view(callback: CallbackQuery):
+async def acc_view(callback: CallbackQuery, db_user: dict):
     acc_id = int(callback.data.split("_")[2])
-    acc = await fetch_one("SELECT * FROM accounts WHERE id = ?", (acc_id,))
+    acc = await fetch_one(
+        "SELECT * FROM accounts WHERE id = ? AND owner_user_id = ?",
+        (acc_id, db_user["telegram_id"]))
     if not acc:
         await callback.answer("Аккаунт не найден", show_alert=True)
         return
@@ -192,15 +198,15 @@ async def acc_add_api_hash(message: Message, state: FSMContext):
 
 
 @router.message(AddAccount.proxy)
-async def acc_add_proxy(message: Message, state: FSMContext):
+async def acc_add_proxy(message: Message, state: FSMContext, db_user: dict):
     proxy_text = message.text.strip()
     proxy = None if proxy_text == "-" else proxy_text
     data = await state.get_data()
     await state.clear()
 
     acc_id = await execute_returning(
-        "INSERT INTO accounts (phone, api_id, api_hash, proxy) VALUES (?, ?, ?, ?)",
-        (data["phone"], data["api_id"], data["api_hash"], proxy),
+        "INSERT INTO accounts (phone, api_id, api_hash, proxy, owner_user_id) VALUES (?, ?, ?, ?, ?)",
+        (data["phone"], data["api_id"], data["api_hash"], proxy, db_user["telegram_id"]),
     )
     await message.answer(
         f"✅ Аккаунт <code>{data['phone']}</code> добавлен (#{acc_id}).\n\n"
@@ -254,7 +260,7 @@ async def acc_quick_phone(message: Message, state: FSMContext):
 
 
 @router.message(AddQuick.proxy)
-async def acc_quick_proxy(message: Message, state: FSMContext):
+async def acc_quick_proxy(message: Message, state: FSMContext, db_user: dict):
     from core.config import API_ID, API_HASH
     proxy_text = message.text.strip()
     proxy = None if proxy_text == "-" else proxy_text
@@ -262,8 +268,8 @@ async def acc_quick_proxy(message: Message, state: FSMContext):
     await state.clear()
 
     acc_id = await execute_returning(
-        "INSERT INTO accounts (phone, api_id, api_hash, proxy) VALUES (?, ?, ?, ?)",
-        (data["phone"], API_ID, API_HASH, proxy),
+        "INSERT INTO accounts (phone, api_id, api_hash, proxy, owner_user_id) VALUES (?, ?, ?, ?, ?)",
+        (data["phone"], API_ID, API_HASH, proxy, db_user["telegram_id"]),
     )
     await message.answer(
         f"✅ Аккаунт <code>{data['phone']}</code> добавлен (#{acc_id}).\n\n"
@@ -334,7 +340,7 @@ async def acc_session_api_hash(message: Message, state: FSMContext):
 
 
 @router.message(AddSession.proxy)
-async def acc_session_proxy(message: Message, state: FSMContext):
+async def acc_session_proxy(message: Message, state: FSMContext, db_user: dict):
     proxy_text = message.text.strip()
     proxy = None if proxy_text == "-" else proxy_text
     data = await state.get_data()
@@ -342,8 +348,9 @@ async def acc_session_proxy(message: Message, state: FSMContext):
 
     # Сначала создаём запись чтобы получить id для файла сессии
     acc_id = await execute_returning(
-        "INSERT INTO accounts (phone, api_id, api_hash, proxy, status) VALUES (?, ?, ?, ?, 'importing')",
-        ("importing...", data["api_id"], data["api_hash"], proxy),
+        "INSERT INTO accounts (phone, api_id, api_hash, proxy, status, owner_user_id) "
+        "VALUES (?, ?, ?, ?, 'importing', ?)",
+        ("importing...", data["api_id"], data["api_hash"], proxy, db_user["telegram_id"]),
     )
 
     await message.answer("⏳ Импортирую сессию...")
@@ -446,15 +453,16 @@ async def acc_file_api_hash(message: Message, state: FSMContext):
 
 
 @router.message(AddSessionFile.proxy)
-async def acc_file_proxy(message: Message, state: FSMContext):
+async def acc_file_proxy(message: Message, state: FSMContext, db_user: dict):
     proxy_text = message.text.strip()
     proxy = None if proxy_text == "-" else proxy_text
     data = await state.get_data()
     await state.clear()
 
     acc_id = await execute_returning(
-        "INSERT INTO accounts (phone, api_id, api_hash, proxy, status) VALUES (?, ?, ?, ?, 'importing')",
-        ("importing...", data["api_id"], data["api_hash"], proxy),
+        "INSERT INTO accounts (phone, api_id, api_hash, proxy, status, owner_user_id) "
+        "VALUES (?, ?, ?, ?, 'importing', ?)",
+        ("importing...", data["api_id"], data["api_hash"], proxy, db_user["telegram_id"]),
     )
 
     await message.answer("⏳ Импортирую сессию из файла...")
@@ -565,15 +573,16 @@ async def acc_tdata_api_hash(message: Message, state: FSMContext):
 
 
 @router.message(AddTdata.proxy)
-async def acc_tdata_proxy(message: Message, state: FSMContext):
+async def acc_tdata_proxy(message: Message, state: FSMContext, db_user: dict):
     proxy_text = message.text.strip()
     proxy = None if proxy_text == "-" else proxy_text
     data = await state.get_data()
     await state.clear()
 
     acc_id = await execute_returning(
-        "INSERT INTO accounts (phone, api_id, api_hash, proxy, status) VALUES (?, ?, ?, ?, 'importing')",
-        ("importing...", data["api_id"], data["api_hash"], proxy),
+        "INSERT INTO accounts (phone, api_id, api_hash, proxy, status, owner_user_id) "
+        "VALUES (?, ?, ?, ?, 'importing', ?)",
+        ("importing...", data["api_id"], data["api_hash"], proxy, db_user["telegram_id"]),
     )
 
     await message.answer("⏳ Импортирую tdata... Это может занять несколько секунд.")
@@ -617,8 +626,10 @@ async def acc_tdata_proxy(message: Message, state: FSMContext):
 # ============================================================
 
 @router.callback_query(F.data == "acc_check_all")
-async def acc_check_all(callback: CallbackQuery):
-    accounts = await fetch_all("SELECT * FROM accounts ORDER BY id")
+async def acc_check_all(callback: CallbackQuery, db_user: dict):
+    accounts = await fetch_all(
+        "SELECT * FROM accounts WHERE owner_user_id = ? ORDER BY id",
+        (db_user["telegram_id"],))
     if not accounts:
         await callback.answer("Нет аккаунтов для проверки", show_alert=True)
         return
@@ -676,9 +687,11 @@ async def acc_check_all(callback: CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("acc_check_"))
-async def acc_check(callback: CallbackQuery):
+async def acc_check(callback: CallbackQuery, db_user: dict):
     acc_id = int(callback.data.split("_")[2])
-    acc = await fetch_one("SELECT * FROM accounts WHERE id = ?", (acc_id,))
+    acc = await fetch_one(
+        "SELECT * FROM accounts WHERE id = ? AND owner_user_id = ?",
+        (acc_id, db_user["telegram_id"]))
     if not acc:
         await callback.answer("Аккаунт не найден", show_alert=True)
         return
@@ -731,8 +744,14 @@ async def acc_check(callback: CallbackQuery):
 # ============================================================
 
 @router.callback_query(F.data.startswith("acc_del_confirm_"))
-async def acc_del_confirm(callback: CallbackQuery):
+async def acc_del_confirm(callback: CallbackQuery, db_user: dict):
     acc_id = int(callback.data.split("_")[3])
+    acc = await fetch_one(
+        "SELECT id FROM accounts WHERE id = ? AND owner_user_id = ?",
+        (acc_id, db_user["telegram_id"]))
+    if not acc:
+        await callback.answer("Аккаунт не найден", show_alert=True)
+        return
     await delete_account(acc_id)
     await callback.message.edit_text(
         "✅ Аккаунт удалён.",
@@ -742,9 +761,11 @@ async def acc_del_confirm(callback: CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("acc_del_"))
-async def acc_del(callback: CallbackQuery):
+async def acc_del(callback: CallbackQuery, db_user: dict):
     acc_id = int(callback.data.split("_")[2])
-    acc = await fetch_one("SELECT phone FROM accounts WHERE id = ?", (acc_id,))
+    acc = await fetch_one(
+        "SELECT phone FROM accounts WHERE id = ? AND owner_user_id = ?",
+        (acc_id, db_user["telegram_id"]))
     if not acc:
         await callback.answer("Аккаунт не найден", show_alert=True)
         return
@@ -761,9 +782,11 @@ async def acc_del(callback: CallbackQuery):
 # ============================================================
 
 @router.callback_query(F.data.startswith("acc_auth_"))
-async def acc_auth_start(callback: CallbackQuery, state: FSMContext):
+async def acc_auth_start(callback: CallbackQuery, state: FSMContext, db_user: dict):
     acc_id = int(callback.data.split("_")[2])
-    acc = await fetch_one("SELECT * FROM accounts WHERE id = ?", (acc_id,))
+    acc = await fetch_one(
+        "SELECT * FROM accounts WHERE id = ? AND owner_user_id = ?",
+        (acc_id, db_user["telegram_id"]))
     if not acc:
         await callback.answer("Аккаунт не найден", show_alert=True)
         return
@@ -789,13 +812,15 @@ async def acc_auth_start(callback: CallbackQuery, state: FSMContext):
 
 
 @router.message(AuthAccount.code)
-async def acc_auth_code(message: Message, state: FSMContext):
+async def acc_auth_code(message: Message, state: FSMContext, db_user: dict):
     data = await state.get_data()
     acc_id = data["acc_id"]
     code = message.text.strip()
 
     from services.account_manager import sign_in
-    acc = await fetch_one("SELECT * FROM accounts WHERE id = ?", (acc_id,))
+    acc = await fetch_one(
+        "SELECT * FROM accounts WHERE id = ? AND owner_user_id = ?",
+        (acc_id, db_user["telegram_id"]))
     result = await sign_in(acc, code, data["phone_code_hash"])
 
     if result.get("need_2fa"):
@@ -825,14 +850,16 @@ async def acc_auth_code(message: Message, state: FSMContext):
 
 
 @router.message(Auth2FA.password)
-async def acc_auth_2fa(message: Message, state: FSMContext):
+async def acc_auth_2fa(message: Message, state: FSMContext, db_user: dict):
     data = await state.get_data()
     acc_id = data["acc_id"]
     password = message.text.strip()
     await state.clear()
 
     from services.account_manager import sign_in_2fa
-    acc = await fetch_one("SELECT * FROM accounts WHERE id = ?", (acc_id,))
+    acc = await fetch_one(
+        "SELECT * FROM accounts WHERE id = ? AND owner_user_id = ?",
+        (acc_id, db_user["telegram_id"]))
     result = await sign_in_2fa(acc, password)
 
     if not result["ok"]:
@@ -870,14 +897,16 @@ async def acc_proxy_edit(callback: CallbackQuery, state: FSMContext):
 
 
 @router.message(EditProxy.value)
-async def acc_proxy_save(message: Message, state: FSMContext):
+async def acc_proxy_save(message: Message, state: FSMContext, db_user: dict):
     data = await state.get_data()
     acc_id = data["acc_id"]
     proxy_text = message.text.strip()
     proxy = None if proxy_text == "-" else proxy_text
     await state.clear()
 
-    await execute("UPDATE accounts SET proxy = ? WHERE id = ?", (proxy, acc_id))
+    await execute(
+        "UPDATE accounts SET proxy = ? WHERE id = ? AND owner_user_id = ?",
+        (proxy, acc_id, db_user["telegram_id"]))
 
     # Сбрасываем клиент чтобы пересоздать с новым прокси
     from services.account_manager import disconnect

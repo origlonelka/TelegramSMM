@@ -18,9 +18,11 @@ class AddMessage(StatesGroup):
 # --- Меню сообщений ---
 
 @router.callback_query(F.data.in_({"messages", "back_messages"}))
-async def messages_menu(callback: CallbackQuery, state: FSMContext):
+async def messages_menu(callback: CallbackQuery, state: FSMContext, db_user: dict):
     await state.clear()
-    count = await fetch_one("SELECT COUNT(*) as cnt FROM messages")
+    count = await fetch_one(
+        "SELECT COUNT(*) as cnt FROM messages WHERE owner_user_id = ?",
+        (db_user["telegram_id"],))
     text = f"💬 <b>Шаблоны сообщений</b>\n\nВсего: {count['cnt']}"
     await callback.message.edit_text(text, reply_markup=messages_menu_kb(), parse_mode="HTML")
     await callback.answer()
@@ -29,8 +31,10 @@ async def messages_menu(callback: CallbackQuery, state: FSMContext):
 # --- Список ---
 
 @router.callback_query(F.data == "msg_list")
-async def msg_list(callback: CallbackQuery):
-    messages = await fetch_all("SELECT id, text, is_active FROM messages ORDER BY id")
+async def msg_list(callback: CallbackQuery, db_user: dict):
+    messages = await fetch_all(
+        "SELECT id, text, is_active FROM messages WHERE owner_user_id = ? ORDER BY id",
+        (db_user["telegram_id"],))
     if not messages:
         await callback.answer("Список пуст", show_alert=True)
         return
@@ -45,9 +49,11 @@ async def msg_list(callback: CallbackQuery):
 # --- Просмотр ---
 
 @router.callback_query(F.data.startswith("msg_view_"))
-async def msg_view(callback: CallbackQuery):
+async def msg_view(callback: CallbackQuery, db_user: dict):
     msg_id = int(callback.data.split("_")[2])
-    msg = await fetch_one("SELECT * FROM messages WHERE id = ?", (msg_id,))
+    msg = await fetch_one(
+        "SELECT * FROM messages WHERE id = ? AND owner_user_id = ?",
+        (msg_id, db_user["telegram_id"]))
     if not msg:
         await callback.answer("Сообщение не найдено", show_alert=True)
         return
@@ -79,12 +85,13 @@ async def msg_add_start(callback: CallbackQuery, state: FSMContext):
 
 
 @router.message(AddMessage.text)
-async def msg_add_text(message: Message, state: FSMContext):
+async def msg_add_text(message: Message, state: FSMContext, db_user: dict):
     text = message.text.strip()
     await state.clear()
 
     msg_id = await execute_returning(
-        "INSERT INTO messages (text) VALUES (?)", (text,)
+        "INSERT INTO messages (text, owner_user_id) VALUES (?, ?)",
+        (text, db_user["telegram_id"]),
     )
     await message.answer(
         f"✅ Сообщение добавлено (#{msg_id}).",
@@ -95,9 +102,14 @@ async def msg_add_text(message: Message, state: FSMContext):
 # --- Вкл/Выкл ---
 
 @router.callback_query(F.data.startswith("msg_toggle_"))
-async def msg_toggle(callback: CallbackQuery):
+async def msg_toggle(callback: CallbackQuery, db_user: dict):
     msg_id = int(callback.data.split("_")[2])
-    msg = await fetch_one("SELECT is_active FROM messages WHERE id = ?", (msg_id,))
+    msg = await fetch_one(
+        "SELECT is_active FROM messages WHERE id = ? AND owner_user_id = ?",
+        (msg_id, db_user["telegram_id"]))
+    if not msg:
+        await callback.answer("Сообщение не найдено", show_alert=True)
+        return
     new_status = 0 if msg["is_active"] else 1
     await execute("UPDATE messages SET is_active = ? WHERE id = ?", (new_status, msg_id))
 
@@ -119,9 +131,11 @@ async def msg_toggle(callback: CallbackQuery):
 # --- Удаление ---
 
 @router.callback_query(F.data.startswith("msg_del_confirm_"))
-async def msg_del_confirm(callback: CallbackQuery):
+async def msg_del_confirm(callback: CallbackQuery, db_user: dict):
     msg_id = int(callback.data.split("_")[3])
-    await execute("DELETE FROM messages WHERE id = ?", (msg_id,))
+    await execute(
+        "DELETE FROM messages WHERE id = ? AND owner_user_id = ?",
+        (msg_id, db_user["telegram_id"]))
     await callback.message.edit_text("✅ Сообщение удалено.", reply_markup=messages_menu_kb())
     await callback.answer()
 

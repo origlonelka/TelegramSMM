@@ -1,41 +1,14 @@
 import asyncio
 import logging
-from typing import Any, Awaitable, Callable
-from aiogram import Bot, Dispatcher, BaseMiddleware
-from aiogram.types import Message, CallbackQuery, TelegramObject
+from aiogram import Bot, Dispatcher, Router
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from core.config import BOT_TOKEN, ADMIN_IDS, ADMIN_USERNAMES
+from core.config import BOT_TOKEN
 from db.database import init_db, close_db
 from core.scheduler import start_scheduler
+from bot.middlewares.access import UserAccessMiddleware
 
 from bot.handlers import start, accounts, channels, messages, campaigns, settings, account_setup, presets, proxies, autoreg
-
-
-class AccessMiddleware(BaseMiddleware):
-    """Пропускает только пользователей из ADMIN_IDS."""
-
-    async def __call__(
-        self,
-        handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]],
-        event: TelegramObject,
-        data: dict[str, Any],
-    ) -> Any:
-        user = None
-        if isinstance(event, Message):
-            user = event.from_user
-        elif isinstance(event, CallbackQuery):
-            user = event.from_user
-
-        if user and user.id not in ADMIN_IDS:
-            username = (user.username or "").lower()
-            if not username or username not in ADMIN_USERNAMES:
-                if isinstance(event, Message):
-                    await event.answer("⛔ У вас нет доступа к этому боту.")
-                elif isinstance(event, CallbackQuery):
-                    await event.answer("⛔ Нет доступа", show_alert=True)
-                return
-        return await handler(event, data)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -53,21 +26,23 @@ async def main():
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher(storage=MemoryStorage())
 
-    # Middleware проверки доступа
-    dp.message.middleware(AccessMiddleware())
-    dp.callback_query.middleware(AccessMiddleware())
-
-    # Регистрация роутеров
+    # /start — без middleware (обрабатывает trial/paywall сам)
     dp.include_router(start.router)
-    dp.include_router(accounts.router)
-    dp.include_router(channels.router)
-    dp.include_router(messages.router)
-    dp.include_router(campaigns.router)
-    dp.include_router(account_setup.router)
-    dp.include_router(presets.router)
-    dp.include_router(proxies.router)
-    dp.include_router(autoreg.router)
-    dp.include_router(settings.router)
+
+    # Рабочие роутеры — с UserAccessMiddleware (проверяет trial/подписку)
+    work_router = Router(name="work")
+    work_router.message.middleware(UserAccessMiddleware())
+    work_router.callback_query.middleware(UserAccessMiddleware())
+    work_router.include_router(accounts.router)
+    work_router.include_router(channels.router)
+    work_router.include_router(messages.router)
+    work_router.include_router(campaigns.router)
+    work_router.include_router(account_setup.router)
+    work_router.include_router(presets.router)
+    work_router.include_router(proxies.router)
+    work_router.include_router(autoreg.router)
+    work_router.include_router(settings.router)
+    dp.include_router(work_router)
 
     # Запуск планировщика
     start_scheduler()

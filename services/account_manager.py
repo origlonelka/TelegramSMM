@@ -233,23 +233,61 @@ def _tdata_to_session(tdata_path: str, session_path: str, api_id: int) -> None:
         conn.close()
 
 
+def _safe_extract_zip(
+    zf: zipfile.ZipFile,
+    dest: str,
+    max_total_size: int = 500 * 1024 * 1024,
+    max_files: int = 1000,
+    max_single_size: int = 100 * 1024 * 1024,
+) -> None:
+    """Safely extract ZIP without path traversal, symlinks, or bombs."""
+    real_dest = os.path.realpath(dest)
+    total_size = 0
+
+    for i, member in enumerate(zf.infolist()):
+        if i >= max_files:
+            raise ValueError(f"ZIP содержит слишком много файлов (>{max_files})")
+
+        # Block path traversal
+        if ".." in member.filename or member.filename.startswith("/"):
+            raise ValueError(f"Обнаружен path traversal: {member.filename}")
+
+        # Block symlinks (Unix external_attr: 0o120000 in upper 16 bits)
+        unix_attrs = member.external_attr >> 16
+        if unix_attrs & 0o170000 == 0o120000:
+            raise ValueError(f"Symlink запрещён: {member.filename}")
+
+        # Check resolved path stays within dest
+        target = os.path.realpath(os.path.join(dest, member.filename))
+        if not (target == real_dest or target.startswith(real_dest + os.sep)):
+            raise ValueError(f"Path escape: {member.filename}")
+
+        # Check individual file size
+        if member.file_size > max_single_size:
+            raise ValueError(
+                f"Файл слишком большой: {member.filename} "
+                f"({member.file_size // (1024*1024)}MB > {max_single_size // (1024*1024)}MB)"
+            )
+
+        # Check cumulative size
+        total_size += member.file_size
+        if total_size > max_total_size:
+            raise ValueError(
+                f"ZIP слишком большой: >{max_total_size // (1024*1024)}MB")
+
+        zf.extract(member, dest)
+
+
 async def import_tdata(zip_path: str, api_id: int, api_hash: str,
                        acc_id: int, proxy_str: str | None = None) -> dict:
     """Импортирует аккаунт из ZIP-архива с tdata."""
     tmp_dir = None
     try:
-        # 1. Распаковываем ZIP
+        # 1. Безопасная распаковка ZIP
         tmp_dir = tempfile.mkdtemp(prefix="tdata_")
         logger.info(f"[tdata] Шаг 1: распаковка ZIP в {tmp_dir}")
         with zipfile.ZipFile(zip_path, "r") as zf:
-            zf.extractall(tmp_dir)
-
-        # Фиксим права на файлы после распаковки
-        for root, dirs, files in os.walk(tmp_dir):
-            for d in dirs:
-                os.chmod(os.path.join(root, d), 0o755)
-            for f in files:
-                os.chmod(os.path.join(root, f), 0o644)
+            _safe_extract_zip(zf, tmp_dir)
 
         # 2. Ищем папку tdata
         tdata_path = _find_tdata_dir(tmp_dir)
@@ -445,3 +483,40 @@ async def disconnect(acc_id: int):
         except Exception:
             pass
         _clients.pop(acc_id, None)
+
+
+async def hard_delete_account(acc_id: int, actor_user_id: int = None):
+    """Complete account deletion: disconnect, delete sessions, DB cleanup, audit."""
+    from db.database import get_db, fetch_one
+
+    # 1. Disconnect Pyrogram client
+    await disconnect(acc_id)
+
+    # 2. Get account info for audit before deletion
+    acc = await fetch_one("SELECT phone, proxy FROM accounts WHERE id = ?", (acc_id,))
+
+    # 3. Delete all session files
+    session_base = _get_session_path(acc_id)
+    for suffix in (".session", ".session-journal", ".session-wal", ".session-shm"):
+        path = session_base + suffix
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+            except OSError as e:
+                logger.warning(f"Cannot remove {path}: {e}")
+
+    # 4. DB cleanup in transaction
+    db = await get_db()
+    await db.execute("DELETE FROM campaign_accounts WHERE account_id = ?", (acc_id,))
+    await db.execute("UPDATE logs SET account_id = NULL WHERE account_id = ?", (acc_id,))
+    await db.execute("UPDATE proxies SET account_id = NULL WHERE account_id = ?", (acc_id,))
+    await db.execute("DELETE FROM accounts WHERE id = ?", (acc_id,))
+    await db.commit()
+
+    # 5. Audit log
+    if actor_user_id:
+        from services.audit import log_action
+        await log_action(
+            actor_user_id, "account_deleted", "account", acc_id,
+            {"phone": acc["phone"] if acc else None},
+        )

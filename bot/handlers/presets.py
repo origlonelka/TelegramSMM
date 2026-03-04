@@ -23,9 +23,11 @@ class SetPresetLimit(StatesGroup):
 # --- Меню ---
 
 @router.callback_query(F.data.in_({"presets", "back_presets"}))
-async def presets_menu(callback: CallbackQuery, state: FSMContext):
+async def presets_menu(callback: CallbackQuery, state: FSMContext, db_user: dict):
     await state.clear()
-    count = await fetch_one("SELECT COUNT(*) as cnt FROM presets")
+    count = await fetch_one(
+        "SELECT COUNT(*) as cnt FROM presets WHERE owner_user_id = ?",
+        (db_user["telegram_id"],))
     text = (
         f"📦 <b>Пресеты</b>\n\n"
         f"Всего: {count['cnt']}\n\n"
@@ -41,8 +43,10 @@ async def presets_menu(callback: CallbackQuery, state: FSMContext):
 # --- Список ---
 
 @router.callback_query(F.data == "prs_list")
-async def prs_list(callback: CallbackQuery):
-    presets = await fetch_all("SELECT id, name FROM presets ORDER BY id")
+async def prs_list(callback: CallbackQuery, db_user: dict):
+    presets = await fetch_all(
+        "SELECT id, name FROM presets WHERE owner_user_id = ? ORDER BY id",
+        (db_user["telegram_id"],))
     if not presets:
         await callback.answer("Список пуст", show_alert=True)
         return
@@ -57,9 +61,11 @@ async def prs_list(callback: CallbackQuery):
 # --- Просмотр ---
 
 @router.callback_query(F.data.startswith("prs_view_"))
-async def prs_view(callback: CallbackQuery):
+async def prs_view(callback: CallbackQuery, db_user: dict):
     prs_id = int(callback.data.split("_")[2])
-    prs = await fetch_one("SELECT * FROM presets WHERE id = ?", (prs_id,))
+    prs = await fetch_one(
+        "SELECT * FROM presets WHERE id = ? AND owner_user_id = ?",
+        (prs_id, db_user["telegram_id"]))
     if not prs:
         await callback.answer("Пресет не найден", show_alert=True)
         return
@@ -120,14 +126,15 @@ async def prs_add_start(callback: CallbackQuery, state: FSMContext):
 
 
 @router.message(AddPreset.name)
-async def prs_add_name(message: Message, state: FSMContext):
+async def prs_add_name(message: Message, state: FSMContext, db_user: dict):
     name = message.text.strip()
     if not name:
         await message.answer("❌ Название не может быть пустым:")
         return
     await state.clear()
     prs_id = await execute_returning(
-        "INSERT INTO presets (name) VALUES (?)", (name,))
+        "INSERT INTO presets (name, owner_user_id) VALUES (?, ?)",
+        (name, db_user["telegram_id"]))
     await message.answer(
         f"✅ Пресет «{name}» создан (#{prs_id}).\n\n"
         f"Теперь настройте: шаблон профиля, каналы, сообщения, режим и лимиты.",
@@ -138,9 +145,11 @@ async def prs_add_name(message: Message, state: FSMContext):
 # --- Активация ---
 
 @router.callback_query(F.data.startswith("prs_activate_"))
-async def prs_activate(callback: CallbackQuery):
+async def prs_activate(callback: CallbackQuery, db_user: dict):
     prs_id = int(callback.data.split("_")[2])
-    prs = await fetch_one("SELECT name FROM presets WHERE id = ?", (prs_id,))
+    prs = await fetch_one(
+        "SELECT name FROM presets WHERE id = ? AND owner_user_id = ?",
+        (prs_id, db_user["telegram_id"]))
     if not prs:
         await callback.answer("Пресет не найден", show_alert=True)
         return
@@ -240,13 +249,15 @@ async def prs_tpl(callback: CallbackQuery):
 # --- Режим ---
 
 @router.callback_query(F.data.startswith("prs_setmode_"))
-async def prs_setmode(callback: CallbackQuery):
+async def prs_setmode(callback: CallbackQuery, db_user: dict):
     parts = callback.data.split("_")
     prs_id = int(parts[2])
     toggled_mode = "_".join(parts[3:])
 
     # Мультивыбор: переключаем режим вкл/выкл
-    prs = await fetch_one("SELECT mode FROM presets WHERE id = ?", (prs_id,))
+    prs = await fetch_one(
+        "SELECT mode FROM presets WHERE id = ? AND owner_user_id = ?",
+        (prs_id, db_user["telegram_id"]))
     current_modes = set((prs["mode"] or "comments").split(","))
 
     if toggled_mode in current_modes:
@@ -271,9 +282,11 @@ async def prs_setmode(callback: CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("prs_mode_"))
-async def prs_mode(callback: CallbackQuery):
+async def prs_mode(callback: CallbackQuery, db_user: dict):
     prs_id = int(callback.data.split("_")[2])
-    prs = await fetch_one("SELECT * FROM presets WHERE id = ?", (prs_id,))
+    prs = await fetch_one(
+        "SELECT * FROM presets WHERE id = ? AND owner_user_id = ?",
+        (prs_id, db_user["telegram_id"]))
     if not prs:
         await callback.answer("Пресет не найден", show_alert=True)
         return
@@ -293,9 +306,11 @@ async def prs_mode(callback: CallbackQuery):
 # --- Каналы ---
 
 @router.callback_query(F.data.startswith("prs_channels_"))
-async def prs_channels(callback: CallbackQuery):
+async def prs_channels(callback: CallbackQuery, db_user: dict):
     prs_id = int(callback.data.split("_")[2])
-    channels = await fetch_all("SELECT id, username FROM channels ORDER BY id")
+    channels = await fetch_all(
+        "SELECT id, username FROM channels WHERE owner_user_id = ? ORDER BY id",
+        (db_user["telegram_id"],))
     linked = await fetch_all(
         "SELECT channel_id FROM preset_channels WHERE preset_id = ?", (prs_id,))
     selected_ids = {r["channel_id"] for r in linked}
@@ -312,7 +327,7 @@ async def prs_channels(callback: CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("prs_ch_toggle_"))
-async def prs_ch_toggle(callback: CallbackQuery):
+async def prs_ch_toggle(callback: CallbackQuery, db_user: dict):
     parts = callback.data.split("_")
     prs_id = int(parts[3])
     ch_id = int(parts[4])
@@ -329,7 +344,9 @@ async def prs_ch_toggle(callback: CallbackQuery):
             "INSERT INTO preset_channels (preset_id, channel_id) VALUES (?, ?)",
             (prs_id, ch_id))
 
-    channels = await fetch_all("SELECT id, username FROM channels ORDER BY id")
+    channels = await fetch_all(
+        "SELECT id, username FROM channels WHERE owner_user_id = ? ORDER BY id",
+        (db_user["telegram_id"],))
     linked = await fetch_all(
         "SELECT channel_id FROM preset_channels WHERE preset_id = ?", (prs_id,))
     selected_ids = {r["channel_id"] for r in linked}
@@ -342,10 +359,11 @@ async def prs_ch_toggle(callback: CallbackQuery):
 # --- Сообщения ---
 
 @router.callback_query(F.data.startswith("prs_messages_"))
-async def prs_messages(callback: CallbackQuery):
+async def prs_messages(callback: CallbackQuery, db_user: dict):
     prs_id = int(callback.data.split("_")[2])
     messages = await fetch_all(
-        "SELECT id, text FROM messages WHERE is_active = 1 ORDER BY id")
+        "SELECT id, text FROM messages WHERE is_active = 1 AND owner_user_id = ? ORDER BY id",
+        (db_user["telegram_id"],))
     linked = await fetch_all(
         "SELECT message_id FROM preset_messages WHERE preset_id = ?", (prs_id,))
     selected_ids = {r["message_id"] for r in linked}
@@ -362,7 +380,7 @@ async def prs_messages(callback: CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("prs_msg_toggle_"))
-async def prs_msg_toggle(callback: CallbackQuery):
+async def prs_msg_toggle(callback: CallbackQuery, db_user: dict):
     parts = callback.data.split("_")
     prs_id = int(parts[3])
     msg_id = int(parts[4])
@@ -380,7 +398,8 @@ async def prs_msg_toggle(callback: CallbackQuery):
             (prs_id, msg_id))
 
     messages = await fetch_all(
-        "SELECT id, text FROM messages WHERE is_active = 1 ORDER BY id")
+        "SELECT id, text FROM messages WHERE is_active = 1 AND owner_user_id = ? ORDER BY id",
+        (db_user["telegram_id"],))
     linked = await fetch_all(
         "SELECT message_id FROM preset_messages WHERE preset_id = ?", (prs_id,))
     selected_ids = {r["message_id"] for r in linked}
@@ -393,9 +412,11 @@ async def prs_msg_toggle(callback: CallbackQuery):
 # --- Лимиты ---
 
 @router.callback_query(F.data.startswith("prs_limits_"))
-async def prs_limits(callback: CallbackQuery):
+async def prs_limits(callback: CallbackQuery, db_user: dict):
     prs_id = int(callback.data.split("_")[2])
-    prs = await fetch_one("SELECT * FROM presets WHERE id = ?", (prs_id,))
+    prs = await fetch_one(
+        "SELECT * FROM presets WHERE id = ? AND owner_user_id = ?",
+        (prs_id, db_user["telegram_id"]))
     text = (
         f"⚙️ <b>Лимиты пресета «{prs['name']}»</b>\n\n"
         f"⏱ Мин. задержка: {prs['delay_min']} сек\n"
@@ -429,7 +450,7 @@ async def prs_set_limit(callback: CallbackQuery, state: FSMContext):
 
 
 @router.message(SetPresetLimit.value)
-async def prs_set_limit_value(message: Message, state: FSMContext):
+async def prs_set_limit_value(message: Message, state: FSMContext, db_user: dict):
     if not message.text.strip().isdigit():
         await message.answer("❌ Введите число:")
         return
@@ -438,8 +459,8 @@ async def prs_set_limit_value(message: Message, state: FSMContext):
     await state.clear()
 
     await execute(
-        f"UPDATE presets SET {data['db_field']} = ? WHERE id = ?",
-        (value, data["prs_id"]),
+        f"UPDATE presets SET {data['db_field']} = ? WHERE id = ? AND owner_user_id = ?",
+        (value, data["prs_id"], db_user["telegram_id"]),
     )
     await message.answer(
         f"✅ Значение обновлено.",
@@ -450,8 +471,14 @@ async def prs_set_limit_value(message: Message, state: FSMContext):
 # --- Удаление ---
 
 @router.callback_query(F.data.startswith("prs_del_confirm_"))
-async def prs_del_confirm(callback: CallbackQuery):
+async def prs_del_confirm(callback: CallbackQuery, db_user: dict):
     prs_id = int(callback.data.split("_")[3])
+    prs = await fetch_one(
+        "SELECT id FROM presets WHERE id = ? AND owner_user_id = ?",
+        (prs_id, db_user["telegram_id"]))
+    if not prs:
+        await callback.answer("Пресет не найден", show_alert=True)
+        return
     await execute("DELETE FROM preset_channels WHERE preset_id = ?", (prs_id,))
     await execute("DELETE FROM preset_messages WHERE preset_id = ?", (prs_id,))
     await execute("DELETE FROM presets WHERE id = ?", (prs_id,))
@@ -461,9 +488,11 @@ async def prs_del_confirm(callback: CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("prs_del_"))
-async def prs_del(callback: CallbackQuery):
+async def prs_del(callback: CallbackQuery, db_user: dict):
     prs_id = int(callback.data.split("_")[2])
-    prs = await fetch_one("SELECT name FROM presets WHERE id = ?", (prs_id,))
+    prs = await fetch_one(
+        "SELECT name FROM presets WHERE id = ? AND owner_user_id = ?",
+        (prs_id, db_user["telegram_id"]))
     if not prs:
         await callback.answer("Пресет не найден", show_alert=True)
         return

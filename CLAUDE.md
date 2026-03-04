@@ -17,7 +17,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 cp .env.example .env
-# Edit .env: set BOT_TOKEN, ADMIN_IDS, ADMIN_USERNAMES, API_ID, API_HASH
+# Edit .env: set BOT_TOKEN, ADMIN_IDS, API_ID, API_HASH
 
 python main.py
 ```
@@ -76,7 +76,7 @@ Three APScheduler jobs on `AsyncIOScheduler`:
 
 - **Callback data format:** `prefix_action_id` or `prefix_action_id1_id2`. Parsed via `F.data == "..."` for exact match or `F.data.startswith("prefix_")` with string splitting for ID extraction.
 - **FSM states per handler:** `accounts.py` has 7 StatesGroups (AddAccount, AddQuick, AddSession, AddSessionFile, AddTdata, AuthAccount, Auth2FA, EditProxy). Other handlers have 1-2 each.
-- **Admin access control:** `AccessMiddleware` in `main.py` checks both `ADMIN_IDS` (user IDs) and `ADMIN_USERNAMES`. Blocks non-admins before any handler runs.
+- **Admin access control:** `AccessMiddleware` in `main.py` checks `admins` table by Telegram ID + `SUPERADMIN_IDS` from .env. No username-based access.
 - **Account selection strategy:** `_pick_account()` in `commenter.py` sorts by `comments_today` ascending, skips accounts exceeding hourly/daily limits.
 - **Error resilience in campaigns:** Dead accounts are auto-deleted from DB. Rate-limited accounts are marked `limited`. FloodWait pauses the campaign for the required duration.
 
@@ -85,8 +85,7 @@ Three APScheduler jobs on `AsyncIOScheduler`:
 | Variable | Description |
 |----------|-------------|
 | `BOT_TOKEN` | Telegram Bot API token |
-| `ADMIN_IDS` | Comma-separated Telegram user IDs with admin access |
-| `ADMIN_USERNAMES` | Comma-separated Telegram usernames with admin access |
+| `ADMIN_IDS` | Comma-separated Telegram user IDs with superadmin access |
 | `API_ID` | Telegram API ID from my.telegram.org (for Pyrogram) |
 | `API_HASH` | Telegram API Hash from my.telegram.org (for Pyrogram) |
 

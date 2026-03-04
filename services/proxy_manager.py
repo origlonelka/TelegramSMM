@@ -1,4 +1,5 @@
 import asyncio
+import struct
 import time
 import logging
 from urllib.parse import urlparse
@@ -6,6 +7,10 @@ from urllib.parse import urlparse
 from db.database import execute, execute_returning, fetch_one, fetch_all
 
 logger = logging.getLogger(__name__)
+
+# Telegram DC2 for connectivity test
+_TG_DC2_HOST = "149.154.167.50"
+_TG_DC2_PORT = 443
 
 
 def parse_proxy_line(line: str) -> dict | None:
@@ -87,8 +92,87 @@ async def import_proxies(text: str) -> dict:
     return {"added": added, "skipped": skipped, "errors": errors}
 
 
+async def _socks5_handshake(reader, writer, username=None, password=None):
+    """Perform SOCKS5 handshake and request CONNECT to Telegram DC2."""
+    # Greeting: version=5, 1 method (0x00=no auth or 0x02=user/pass)
+    if username and password:
+        writer.write(b"\x05\x02\x00\x02")  # offer no-auth and user/pass
+    else:
+        writer.write(b"\x05\x01\x00")  # offer no-auth only
+    await writer.drain()
+
+    resp = await reader.readexactly(2)
+    if resp[0] != 0x05:
+        raise ValueError("Not a SOCKS5 proxy")
+
+    chosen_method = resp[1]
+    if chosen_method == 0x02:
+        # Username/password auth (RFC 1929)
+        if not username or not password:
+            raise ValueError("Proxy requires auth but no credentials provided")
+        user_bytes = username.encode()
+        pass_bytes = password.encode()
+        writer.write(
+            b"\x01"
+            + bytes([len(user_bytes)]) + user_bytes
+            + bytes([len(pass_bytes)]) + pass_bytes
+        )
+        await writer.drain()
+        auth_resp = await reader.readexactly(2)
+        if auth_resp[1] != 0x00:
+            raise PermissionError("SOCKS5 auth failed")
+    elif chosen_method == 0xFF:
+        raise PermissionError("SOCKS5 no acceptable auth methods")
+
+    # CONNECT request to Telegram DC2
+    ip_bytes = bytes(int(x) for x in _TG_DC2_HOST.split("."))
+    port_bytes = struct.pack("!H", _TG_DC2_PORT)
+    writer.write(b"\x05\x01\x00\x01" + ip_bytes + port_bytes)
+    await writer.drain()
+
+    connect_resp = await reader.readexactly(4)
+    if connect_resp[1] != 0x00:
+        raise ConnectionError(f"SOCKS5 CONNECT failed: status {connect_resp[1]}")
+
+    # Read remaining address bytes
+    atype = connect_resp[3]
+    if atype == 0x01:  # IPv4
+        await reader.readexactly(4 + 2)
+    elif atype == 0x03:  # Domain
+        length = (await reader.readexactly(1))[0]
+        await reader.readexactly(length + 2)
+    elif atype == 0x04:  # IPv6
+        await reader.readexactly(16 + 2)
+
+
+async def _http_connect_handshake(reader, writer, username=None, password=None):
+    """Perform HTTP CONNECT to Telegram DC2 through HTTP proxy."""
+    connect_line = f"CONNECT {_TG_DC2_HOST}:{_TG_DC2_PORT} HTTP/1.1\r\nHost: {_TG_DC2_HOST}:{_TG_DC2_PORT}\r\n"
+    if username and password:
+        import base64
+        creds = base64.b64encode(f"{username}:{password}".encode()).decode()
+        connect_line += f"Proxy-Authorization: Basic {creds}\r\n"
+    connect_line += "\r\n"
+    writer.write(connect_line.encode())
+    await writer.drain()
+
+    # Read status line
+    status_line = await reader.readline()
+    status_str = status_line.decode(errors="replace")
+    if " 200 " not in status_str:
+        if " 407 " in status_str:
+            raise PermissionError("HTTP proxy auth failed (407)")
+        raise ConnectionError(f"HTTP CONNECT failed: {status_str.strip()}")
+
+    # Read remaining headers until empty line
+    while True:
+        line = await reader.readline()
+        if line in (b"\r\n", b"\n", b""):
+            break
+
+
 async def check_proxy(proxy_id: int) -> dict:
-    """Проверяет прокси — TCP-соединение к хосту."""
+    """Проверяет прокси — SOCKS5/HTTP handshake + подключение к Telegram DC."""
     proxy = await fetch_one("SELECT * FROM proxies WHERE id = ?", (proxy_id,))
     if not proxy:
         return {"ok": False, "error": "Прокси не найден"}
@@ -96,37 +180,69 @@ async def check_proxy(proxy_id: int) -> dict:
     parsed = urlparse(proxy["url"])
     host = parsed.hostname
     port = parsed.port
+    scheme = (parsed.scheme or "socks5").lower()
+    username = parsed.username
+    password = parsed.password
 
     if not host or not port:
         await execute(
-            "UPDATE proxies SET status = 'dead', "
+            "UPDATE proxies SET status = 'dead', last_error = 'Invalid format', "
             "last_checked_at = datetime('now') WHERE id = ?",
             (proxy_id,))
         return {"ok": False, "error": "Неверный формат"}
 
-    start = time.monotonic()
+    start_time = time.monotonic()
+    status = "dead"
+    error_msg = None
+
     try:
         reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(host, port),
-            timeout=10,
-        )
-        elapsed = int((time.monotonic() - start) * 1000)
-        writer.close()
-        await writer.wait_closed()
+            asyncio.open_connection(host, port), timeout=10)
 
-        await execute(
-            "UPDATE proxies SET status = 'alive', response_time = ?, "
-            "last_checked_at = datetime('now') WHERE id = ?",
-            (elapsed, proxy_id),
-        )
-        return {"ok": True, "response_time": elapsed}
+        try:
+            if scheme in ("socks5", "socks5h"):
+                await asyncio.wait_for(
+                    _socks5_handshake(reader, writer, username, password),
+                    timeout=10)
+            elif scheme in ("http", "https"):
+                await asyncio.wait_for(
+                    _http_connect_handshake(reader, writer, username, password),
+                    timeout=10)
+            else:
+                # Fallback: try SOCKS5
+                await asyncio.wait_for(
+                    _socks5_handshake(reader, writer, username, password),
+                    timeout=10)
 
+            status = "alive"
+        finally:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+
+    except PermissionError as e:
+        status = "auth_failed"
+        error_msg = str(e)
+    except asyncio.TimeoutError:
+        status = "timeout"
+        error_msg = "Connection/handshake timeout"
     except Exception as e:
-        await execute(
-            "UPDATE proxies SET status = 'dead', "
-            "last_checked_at = datetime('now') WHERE id = ?",
-            (proxy_id,))
-        return {"ok": False, "error": str(e)}
+        status = "dead"
+        error_msg = str(e)
+
+    elapsed = int((time.monotonic() - start_time) * 1000)
+
+    await execute(
+        "UPDATE proxies SET status = ?, response_time = ?, latency_ms = ?, "
+        "last_error = ?, last_checked_at = datetime('now') WHERE id = ?",
+        (status, elapsed if status == "alive" else None,
+         elapsed, error_msg, proxy_id))
+
+    if status == "alive":
+        return {"ok": True, "response_time": elapsed, "status": status}
+    return {"ok": False, "error": error_msg or status, "status": status}
 
 
 async def check_all_proxies() -> dict:

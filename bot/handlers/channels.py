@@ -22,9 +22,11 @@ class SearchChannel(StatesGroup):
 # --- Меню каналов ---
 
 @router.callback_query(F.data.in_({"channels", "back_channels"}))
-async def channels_menu(callback: CallbackQuery, state: FSMContext):
+async def channels_menu(callback: CallbackQuery, state: FSMContext, db_user: dict):
     await state.clear()
-    count = await fetch_one("SELECT COUNT(*) as cnt FROM channels")
+    count = await fetch_one(
+        "SELECT COUNT(*) as cnt FROM channels WHERE owner_user_id = ?",
+        (db_user["telegram_id"],))
     text = f"📢 <b>Каналы</b>\n\nВсего: {count['cnt']}"
     await callback.message.edit_text(text, reply_markup=channels_menu_kb(), parse_mode="HTML")
     await callback.answer()
@@ -33,8 +35,10 @@ async def channels_menu(callback: CallbackQuery, state: FSMContext):
 # --- Список ---
 
 @router.callback_query(F.data == "ch_list")
-async def ch_list(callback: CallbackQuery):
-    channels = await fetch_all("SELECT id, username, title, has_comments FROM channels ORDER BY id")
+async def ch_list(callback: CallbackQuery, db_user: dict):
+    channels = await fetch_all(
+        "SELECT id, username, title, has_comments FROM channels WHERE owner_user_id = ? ORDER BY id",
+        (db_user["telegram_id"],))
     if not channels:
         await callback.answer("Список пуст", show_alert=True)
         return
@@ -49,9 +53,11 @@ async def ch_list(callback: CallbackQuery):
 # --- Просмотр ---
 
 @router.callback_query(F.data.startswith("ch_view_"))
-async def ch_view(callback: CallbackQuery):
+async def ch_view(callback: CallbackQuery, db_user: dict):
     ch_id = int(callback.data.split("_")[2])
-    ch = await fetch_one("SELECT * FROM channels WHERE id = ?", (ch_id,))
+    ch = await fetch_one(
+        "SELECT * FROM channels WHERE id = ? AND owner_user_id = ?",
+        (ch_id, db_user["telegram_id"]))
     if not ch:
         await callback.answer("Канал не найден", show_alert=True)
         return
@@ -81,17 +87,20 @@ async def ch_add_start(callback: CallbackQuery, state: FSMContext):
 
 
 @router.message(AddChannel.username)
-async def ch_add_username(message: Message, state: FSMContext):
+async def ch_add_username(message: Message, state: FSMContext, db_user: dict):
     username = message.text.strip().lstrip("@")
     await state.clear()
 
-    existing = await fetch_one("SELECT id FROM channels WHERE username = ?", (username,))
+    existing = await fetch_one(
+        "SELECT id FROM channels WHERE username = ? AND owner_user_id = ?",
+        (username, db_user["telegram_id"]))
     if existing:
         await message.answer("❌ Канал уже добавлен.")
         return
 
     ch_id = await execute_returning(
-        "INSERT INTO channels (username) VALUES (?)", (username,)
+        "INSERT INTO channels (username, owner_user_id) VALUES (?, ?)",
+        (username, db_user["telegram_id"]),
     )
     await message.answer(
         f"✅ Канал @{username} добавлен (#{ch_id}).",
@@ -170,15 +179,18 @@ async def noop_handler(callback: CallbackQuery):
 # --- Добавление из поиска ---
 
 @router.callback_query(F.data.startswith("ch_search_add_"))
-async def ch_search_add(callback: CallbackQuery, state: FSMContext):
+async def ch_search_add(callback: CallbackQuery, state: FSMContext, db_user: dict):
     username = callback.data.replace("ch_search_add_", "")
-    existing = await fetch_one("SELECT id FROM channels WHERE username = ?", (username,))
+    existing = await fetch_one(
+        "SELECT id FROM channels WHERE username = ? AND owner_user_id = ?",
+        (username, db_user["telegram_id"]))
     if existing:
         await callback.answer("Канал уже добавлен", show_alert=True)
         return
 
     await execute_returning(
-        "INSERT INTO channels (username) VALUES (?)", (username,)
+        "INSERT INTO channels (username, owner_user_id) VALUES (?, ?)",
+        (username, db_user["telegram_id"]),
     )
 
     # Обновляем флаг already_added в кэше результатов
@@ -196,17 +208,21 @@ async def ch_search_add(callback: CallbackQuery, state: FSMContext):
 # --- Удаление ---
 
 @router.callback_query(F.data.startswith("ch_del_confirm_"))
-async def ch_del_confirm(callback: CallbackQuery):
+async def ch_del_confirm(callback: CallbackQuery, db_user: dict):
     ch_id = int(callback.data.split("_")[3])
-    await execute("DELETE FROM channels WHERE id = ?", (ch_id,))
+    await execute(
+        "DELETE FROM channels WHERE id = ? AND owner_user_id = ?",
+        (ch_id, db_user["telegram_id"]))
     await callback.message.edit_text("✅ Канал удалён.", reply_markup=channels_menu_kb())
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("ch_del_"))
-async def ch_del(callback: CallbackQuery):
+async def ch_del(callback: CallbackQuery, db_user: dict):
     ch_id = int(callback.data.split("_")[2])
-    ch = await fetch_one("SELECT username FROM channels WHERE id = ?", (ch_id,))
+    ch = await fetch_one(
+        "SELECT username FROM channels WHERE id = ? AND owner_user_id = ?",
+        (ch_id, db_user["telegram_id"]))
     if not ch:
         await callback.answer("Канал не найден", show_alert=True)
         return
