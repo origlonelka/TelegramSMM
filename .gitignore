@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*.so
+.env
+*.session
+*.session-journal
+sessions/
+data.db
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+.idea/
+.vscode/
+plan.md

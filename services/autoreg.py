@@ -1,0 +1,438 @@
+import asyncio
+import json
+import os
+import logging
+import aiohttp
+
+from pyrogram import Client
+from pyrogram.enums import SentCodeType
+from pyrogram.errors import (
+    SessionPasswordNeeded, FloodWait, PhoneNumberBanned,
+    PhoneNumberInvalid,
+)
+
+from db.database import execute, execute_returning, fetch_one, fetch_all
+from core.config import API_ID, API_HASH, SESSIONS_DIR
+from services.account_manager import _parse_proxy
+from services.spintax import spin
+
+logger = logging.getLogger(__name__)
+
+os.makedirs(SESSIONS_DIR, exist_ok=True)
+
+SMS_ACTIVATE_URL = "https://hero-sms.com/stubs/handler_api.php"
+
+COUNTRIES = {
+    0: "🇷🇺 Россия",
+    1: "🇺🇦 Украина",
+    2: "🇰🇿 Казахстан",
+    6: "🇮🇩 Индонезия",
+    12: "🇺🇸 США",
+    16: "🇬🇧 Великобритания",
+    22: "🇮🇳 Индия",
+    56: "🇹🇷 Турция",
+    175: "🇧🇷 Бразилия",
+    187: "🇳🇬 Нигерия",
+}
+
+DEFAULT_NAMES = "{Алексей|Дмитрий|Иван|Сергей|Андрей|Михаил|Максим|Артём|Данил|Никита}"
+
+
+# --- Настройки ---
+
+async def get_setting(key: str) -> str | None:
+    row = await fetch_one("SELECT value FROM bot_settings WHERE key = ?", (key,))
+    return row["value"] if row else None
+
+
+async def set_setting(key: str, value: str):
+    existing = await fetch_one("SELECT key FROM bot_settings WHERE key = ?", (key,))
+    if existing:
+        await execute("UPDATE bot_settings SET value = ? WHERE key = ?", (value, key))
+    else:
+        await execute("INSERT INTO bot_settings (key, value) VALUES (?, ?)", (key, value))
+
+
+# --- HeroSMS API ---
+
+async def _sms_request(params: dict) -> str:
+    api_key = await get_setting("sms_api_key")
+    if not api_key:
+        raise Exception("SMS API ключ не настроен")
+    params["api_key"] = api_key
+    async with aiohttp.ClientSession() as session:
+        async with session.get(SMS_ACTIVATE_URL, params=params, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            return await resp.text()
+
+
+_usd_rub_cache: dict = {"rate": None, "ts": 0}
+
+
+async def _get_usd_rub() -> float:
+    """Курс USD→RUB через ЦБ РФ (кэш 1 час)."""
+    import time
+    now = time.time()
+    if _usd_rub_cache["rate"] and now - _usd_rub_cache["ts"] < 3600:
+        return _usd_rub_cache["rate"]
+    try:
+        url = "https://www.cbr-xml-daily.ru/daily_json.js"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                data = await resp.json(content_type=None)
+                rate = float(data["Valute"]["USD"]["Value"])
+                _usd_rub_cache["rate"] = rate
+                _usd_rub_cache["ts"] = now
+                return rate
+    except Exception:
+        return _usd_rub_cache["rate"] or 90.0  # fallback
+
+
+async def get_balance() -> tuple[float, float]:
+    """Возвращает (баланс_usd, баланс_rub)."""
+    text = await _sms_request({"action": "getBalance"})
+    if text.startswith("ACCESS_BALANCE:"):
+        usd = float(text.split(":")[1])
+        rate = await _get_usd_rub()
+        return usd, usd * rate
+    raise Exception(f"Ошибка: {text}")
+
+
+async def _get_min_price(country: int = 0) -> float | None:
+    """Получает минимальную цену на номер Telegram в указанной стране."""
+    text = await _sms_request({
+        "action": "getPrices",
+        "service": "tg",
+        "country": str(country),
+    })
+    try:
+        data = json.loads(text)
+        prices = []
+
+        def extract_prices(obj):
+            if isinstance(obj, dict):
+                if "cost" in obj:
+                    count = int(obj.get("count", 0))
+                    if count > 0:
+                        prices.append(float(obj["cost"]))
+                else:
+                    for v in obj.values():
+                        extract_prices(v)
+
+        extract_prices(data)
+        return min(prices) if prices else None
+    except Exception:
+        return None
+
+
+async def get_all_min_prices() -> dict[int, float]:
+    """Получает минимальные цены для всех стран параллельно."""
+    import asyncio
+
+    async def _fetch(code: int) -> tuple[int, float | None]:
+        price = await _get_min_price(code)
+        return code, price
+
+    results = await asyncio.gather(
+        *[_fetch(code) for code in COUNTRIES], return_exceptions=True
+    )
+    prices = {}
+    for r in results:
+        if isinstance(r, tuple) and r[1] is not None:
+            prices[r[0]] = r[1]
+    return prices
+
+
+async def _buy_number(country: int = 0) -> dict:
+    min_price = await _get_min_price(country)
+
+    params = {
+        "action": "getNumber",
+        "service": "tg",
+        "country": str(country),
+    }
+    if min_price is not None:
+        params["maxPrice"] = str(min_price)
+
+    text = await _sms_request(params)
+    if text.startswith("ACCESS_NUMBER:"):
+        parts = text.split(":")
+        return {"activation_id": parts[1], "phone": "+" + parts[2]}
+    raise Exception(text)
+
+
+async def _set_activation_status(activation_id: str, status: int) -> str:
+    result = await _sms_request({
+        "action": "setStatus",
+        "id": activation_id,
+        "status": str(status),
+    })
+    logger.info(f"setStatus(id={activation_id}, status={status}) → {result}")
+    return result
+
+
+async def _wait_for_code(activation_id: str, timeout: int = 150) -> str | None:
+    """Ждёт SMS-код от сервиса. Polling каждые 3 секунды."""
+    api_key = await get_setting("sms_api_key")
+    async with aiohttp.ClientSession() as session:
+        for attempt in range(timeout // 3):
+            try:
+                async with session.get(
+                    SMS_ACTIVATE_URL,
+                    params={
+                        "api_key": api_key,
+                        "action": "getStatus",
+                        "id": activation_id,
+                    },
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    text = (await resp.text()).strip()
+
+                    if text.startswith("STATUS_OK:"):
+                        code = text.split(":")[1].strip()
+                        logger.info(f"SMS-код получен для активации {activation_id}: {code}")
+                        return code
+                    if text == "STATUS_CANCEL":
+                        logger.warning(f"Активация {activation_id} отменена сервисом")
+                        return None
+                    if text in ("NO_ACTIVATION", "BAD_KEY", "BAD_ACTION"):
+                        logger.error(f"Ошибка getStatus для {activation_id}: {text}")
+                        return None
+
+                    # STATUS_WAIT_CODE — штатно, ждём дальше
+                    if attempt % 10 == 0:
+                        logger.debug(f"getStatus {activation_id}: {text} (попытка {attempt})")
+
+            except Exception as e:
+                logger.warning(f"getStatus запрос упал для {activation_id}: {e}")
+
+            await asyncio.sleep(3)
+    logger.warning(f"Таймаут ожидания SMS для активации {activation_id} ({timeout}с)")
+    return None
+
+
+# --- Регистрация ---
+
+MAX_NUMBER_ATTEMPTS = 3  # Сколько раз пробовать купить новый номер
+
+
+async def register_one_account(country: int = 0,
+                                progress_callback=None) -> dict:
+    """Полный цикл авторегистрации одного аккаунта.
+
+    progress_callback(text) — опциональный коллбэк для обновления прогресса.
+    """
+    if not API_ID or not API_HASH:
+        return {"ok": False, "error": "API_ID и API_HASH не заданы в .env"}
+
+    api_key = await get_setting("sms_api_key")
+    if not api_key:
+        return {"ok": False, "error": "SMS API ключ не настроен"}
+
+    # Берём прокси из пула (свободный живой)
+    proxy_row = await fetch_one(
+        "SELECT * FROM proxies WHERE status = 'alive' AND account_id IS NULL "
+        "ORDER BY response_time ASC LIMIT 1")
+    proxy_url = proxy_row["url"] if proxy_row else None
+    proxy_dict = _parse_proxy(proxy_url)
+
+    _SMS_TYPES = {SentCodeType.SMS, SentCodeType.FRAGMENT_SMS}
+
+    # Цикл попыток — если номер уже зарегистрирован (код через APP), берём новый
+    for attempt in range(1, MAX_NUMBER_ATTEMPTS + 1):
+        if progress_callback:
+            prefix = f"[{attempt}/{MAX_NUMBER_ATTEMPTS}] " if attempt > 1 else ""
+            await progress_callback(f"{prefix}📱 Покупаю номер...")
+
+        try:
+            number_info = await _buy_number(country)
+        except Exception as e:
+            return {"ok": False, "error": f"Покупка номера: {e}"}
+
+        phone = number_info["phone"]
+        activation_id = number_info["activation_id"]
+
+        if progress_callback:
+            prefix = f"[{attempt}/{MAX_NUMBER_ATTEMPTS}] " if attempt > 1 else ""
+            await progress_callback(f"{prefix}📱 {phone}\n📡 Отправляю код...")
+
+        # Создаём запись в БД
+        acc_id = await execute_returning(
+            "INSERT INTO accounts (phone, api_id, api_hash, proxy, status) "
+            "VALUES (?, ?, ?, ?, 'registering')",
+            (phone, API_ID, API_HASH, proxy_url),
+        )
+
+        session_path = os.path.join(SESSIONS_DIR, f"account_{acc_id}")
+        client = Client(
+            name=session_path,
+            api_id=API_ID,
+            api_hash=API_HASH,
+            proxy=proxy_dict,
+        )
+
+        try:
+            await client.connect()
+
+            sent_code = await client.send_code(phone)
+            code_type = sent_code.type
+            logger.info(f"Авторег {phone}: тип кода — {code_type}")
+
+            # Если код не через SMS — номер уже зарегистрирован, пробуем resend
+            if code_type not in _SMS_TYPES:
+                try:
+                    sent_code = await client.resend_code(phone, sent_code.phone_code_hash)
+                    code_type = sent_code.type
+                    logger.info(f"Авторег {phone}: повторный тип — {code_type}")
+                except Exception as e:
+                    logger.warning(f"Авторег {phone}: resend_code не удался: {e}")
+
+            # Всё ещё не SMS — номер занят, отменяем (до setStatus=1 — возврат денег)
+            if code_type not in _SMS_TYPES:
+                logger.warning(
+                    f"Авторег {phone}: код через {code_type.name}, номер уже занят "
+                    f"(попытка {attempt}/{MAX_NUMBER_ATTEMPTS})")
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+                await _cleanup_account(acc_id, session_path)
+
+                # hero-sms разрешает отмену только через 2 минуты
+                if progress_callback:
+                    await progress_callback(
+                        f"⚠️ {phone} уже в Telegram (код через {code_type.name})\n"
+                        f"⏳ Жду 2 мин для возврата средств...")
+                await asyncio.sleep(120)
+                await _set_activation_status(activation_id, 8)
+
+                if progress_callback:
+                    await progress_callback(
+                        f"⚠️ {phone} уже в Telegram (код через {code_type.name}), "
+                        f"беру другой номер...")
+                continue  # следующая попытка
+
+            phone_code_hash = sent_code.phone_code_hash
+
+            # SMS подтверждён — теперь сообщаем сервису что готовы принять код
+            await _set_activation_status(activation_id, 1)
+
+            if progress_callback:
+                await progress_callback(f"📱 {phone}\n📨 SMS\n⏳ Жду код...")
+
+            # Ждём код
+            code = await _wait_for_code(activation_id, timeout=150)
+
+            if not code:
+                await _set_activation_status(activation_id, 8)
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+                await _cleanup_account(acc_id, session_path)
+                return {"ok": False, "error": f"SMS не пришёл для {phone}"}
+
+            if progress_callback:
+                await progress_callback(f"📱 {phone}\n🔑 Код получен, регистрирую...")
+
+            # 5. Входим / регистрируемся
+            is_new = False
+            try:
+                await client.sign_in(phone, phone_code_hash, code)
+            except Exception as e:
+                err_name = type(e).__name__
+                if "PhoneNumberUnoccupied" in err_name or "PHONE_NUMBER_UNOCCUPIED" in str(e).upper():
+                    first_name = spin(DEFAULT_NAMES)
+                    await client.sign_up(phone, phone_code_hash, first_name)
+                    is_new = True
+                elif isinstance(e, SessionPasswordNeeded):
+                    await _set_activation_status(activation_id, 6)
+                    try:
+                        await client.disconnect()
+                    except Exception:
+                        pass
+                    await _cleanup_account(acc_id, session_path)
+                    return {"ok": False, "error": f"{phone} — требуется 2FA пароль"}
+                else:
+                    raise
+
+            await client.disconnect()
+
+            # 6. Успех — обновляем БД
+            await execute(
+                "UPDATE accounts SET status = 'active', session_file = ? WHERE id = ?",
+                (session_path + ".session", acc_id),
+            )
+
+            if proxy_row:
+                await execute(
+                    "UPDATE proxies SET account_id = ? WHERE id = ?",
+                    (acc_id, proxy_row["id"]))
+
+            await _set_activation_status(activation_id, 6)
+
+            logger.info(
+                f"Авторег: {phone} (#{acc_id}) — "
+                f"{'новый аккаунт' if is_new else 'существующий'}")
+
+            return {
+                "ok": True,
+                "phone": phone,
+                "acc_id": acc_id,
+                "is_new": is_new,
+            }
+
+        except FloodWait as e:
+            await _set_activation_status(activation_id, 8)
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+            await _cleanup_account(acc_id, session_path)
+            return {"ok": False, "error": f"FloodWait: подождите {e.value} сек"}
+
+        except PhoneNumberBanned:
+            await _set_activation_status(activation_id, 8)
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+            await _cleanup_account(acc_id, session_path)
+            # Забаненный номер — пробуем следующий
+            if progress_callback:
+                await progress_callback(f"⚠️ {phone} забанен, беру другой номер...")
+            continue
+
+        except PhoneNumberInvalid:
+            await _set_activation_status(activation_id, 8)
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+            await _cleanup_account(acc_id, session_path)
+            # Невалидный номер — пробуем следующий
+            if progress_callback:
+                await progress_callback(f"⚠️ {phone} невалидный, беру другой номер...")
+            continue
+
+        except Exception as e:
+            await _set_activation_status(activation_id, 8)
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+            await _cleanup_account(acc_id, session_path)
+            logger.error(f"Авторег ошибка: {e}", exc_info=True)
+            return {"ok": False, "error": str(e)}
+
+    # Все попытки исчерпаны
+    return {"ok": False, "error": f"Не удалось найти свободный номер за {MAX_NUMBER_ATTEMPTS} попыток"}
+
+
+async def _cleanup_account(acc_id: int, session_path: str):
+    """Удаляет аккаунт и session файл при неудаче."""
+    from db.database import delete_account
+    await delete_account(acc_id)
+    for ext in (".session", ".session-journal", ".session-wal", ".session-shm"):
+        f = session_path + ext
+        if os.path.exists(f):
+            os.remove(f)
