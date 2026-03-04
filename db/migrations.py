@@ -100,6 +100,52 @@ MIGRATIONS = [
         """INSERT OR IGNORE INTO subscription_plans (code, name, duration_days, price_rub)
            VALUES ('yearly', 'Год', 365, 7990)""",
     ],
+    # Migration 7: admin panel tables (Sprint 4 — ADM)
+    [
+        """CREATE TABLE IF NOT EXISTS promo_codes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT UNIQUE NOT NULL,
+            type TEXT NOT NULL DEFAULT 'discount',
+            value REAL NOT NULL,
+            max_uses INTEGER DEFAULT 0,
+            uses_count INTEGER DEFAULT 0,
+            valid_until TEXT,
+            created_by INTEGER,
+            created_at TEXT DEFAULT (datetime('now'))
+        )""",
+        """CREATE TABLE IF NOT EXISTS promo_activations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            promo_code_id INTEGER NOT NULL,
+            user_telegram_id INTEGER NOT NULL,
+            activated_at TEXT DEFAULT (datetime('now')),
+            UNIQUE(promo_code_id, user_telegram_id)
+        )""",
+        """CREATE TABLE IF NOT EXISTS referrals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            referrer_telegram_id INTEGER NOT NULL,
+            referred_telegram_id INTEGER UNIQUE NOT NULL,
+            bonus_days INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now'))
+        )""",
+        """CREATE TABLE IF NOT EXISTS support_tickets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_telegram_id INTEGER NOT NULL,
+            subject TEXT,
+            status TEXT DEFAULT 'open',
+            assigned_to INTEGER,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+        )""",
+        """CREATE TABLE IF NOT EXISTS ticket_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticket_id INTEGER NOT NULL,
+            sender_telegram_id INTEGER NOT NULL,
+            text TEXT NOT NULL,
+            is_admin INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (ticket_id) REFERENCES support_tickets(id) ON DELETE CASCADE
+        )""",
+    ],
 ]
 
 

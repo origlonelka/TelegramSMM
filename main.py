@@ -12,6 +12,7 @@ from bot.middlewares.access import UserAccessMiddleware
 from core.webhook_server import create_webhook_app, set_bot
 
 from bot.handlers import start, accounts, channels, messages, campaigns, settings, account_setup, presets, proxies, autoreg, payments
+from bot.handlers.admin import admin_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -34,6 +35,9 @@ async def main():
 
     # Платежи — без middleware (пользователи без подписки должны иметь доступ)
     dp.include_router(payments.router)
+
+    # Админ-панель — с AdminMiddleware (проверяет роль)
+    dp.include_router(admin_router)
 
     # Рабочие роутеры — с UserAccessMiddleware (проверяет trial/подписку)
     work_router = Router(name="work")
