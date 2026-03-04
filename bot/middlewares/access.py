@@ -24,11 +24,14 @@ class UserAccessMiddleware(BaseMiddleware):
         if not user:
             return await handler(event, data)
 
-        # Admins bypass paywall
+        # Admins bypass paywall but still need db_user
         admin = await fetch_one(
             "SELECT role FROM admins WHERE user_id = ? AND is_active = 1",
             (user.id,))
         if admin:
+            db_user = await get_or_create_user(
+                user.id, user.username, user.first_name)
+            data["db_user"] = db_user
             data["is_admin"] = True
             data["admin_role"] = admin["role"]
             return await handler(event, data)

@@ -62,7 +62,7 @@ async def plan_toggle(callback: CallbackQuery, admin: dict):
     await log_action(admin["user_id"], "plan_toggled", "plan", plan_id,
                      {"is_active": new_status})
     await callback.answer("Статус изменён")
-    await plans_menu(callback)
+    await plans_menu(callback, admin)
 
 
 @router.callback_query(F.data == "adm_export_payments")
