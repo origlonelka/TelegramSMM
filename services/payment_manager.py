@@ -278,6 +278,21 @@ async def _give_referral_bonus(user_tg_id: int):
     logger.info(f"Referral bonus: {REFERRAL_BONUS_DAYS} days to {referrer_id} "
                 f"from {user_tg_id}")
 
+    # Notify referrer
+    try:
+        from core.webhook_server import _bot_instance
+        if _bot_instance:
+            await _bot_instance.send_message(
+                chat_id=referrer_id,
+                text=(
+                    f"🎉 <b>Реферальный бонус!</b>\n\n"
+                    f"Ваш друг оплатил подписку. "
+                    f"Вы получили <b>{REFERRAL_BONUS_DAYS} дней</b> доступа!"
+                ),
+                parse_mode="HTML")
+    except Exception:
+        pass
+
 
 async def expire_subscriptions():
     """Mark expired subscriptions. Called by scheduler."""
