@@ -7,7 +7,8 @@ def main_menu_kb(is_admin: bool = False) -> InlineKeyboardMarkup:
          InlineKeyboardButton(text="📢 Каналы", callback_data="channels")],
         [InlineKeyboardButton(text="💬 Сообщения", callback_data="messages"),
          InlineKeyboardButton(text="🚀 Кампании", callback_data="campaigns")],
-        [InlineKeyboardButton(text="📦 Пресеты", callback_data="presets")],
+        [InlineKeyboardButton(text="📦 Пресеты", callback_data="presets"),
+         InlineKeyboardButton(text="📣 Промо-чаты", callback_data="promo_chats")],
         [InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings"),
          InlineKeyboardButton(text="📊 Статистика", callback_data="stats")],
     ]
@@ -233,6 +234,7 @@ def campaign_item_kb(camp_id: int, is_active: bool) -> InlineKeyboardMarkup:
          InlineKeyboardButton(text="📱 Аккаунты", callback_data=f"camp_accounts_{camp_id}")],
         [InlineKeyboardButton(text="💬 Сообщения", callback_data=f"camp_messages_{camp_id}"),
          InlineKeyboardButton(text="⚙️ Лимиты", callback_data=f"camp_limits_{camp_id}")],
+        [InlineKeyboardButton(text="📣 Промо-чаты", callback_data=f"camp_pchats_{camp_id}")],
         [InlineKeyboardButton(text="📊 Логи", callback_data=f"camp_logs_{camp_id}")],
         [InlineKeyboardButton(text="🗑 Удалить", callback_data=f"camp_del_{camp_id}")],
         [InlineKeyboardButton(text="◀️ К кампаниям", callback_data="campaigns")],
@@ -293,6 +295,7 @@ MODE_LABELS = {
     "dm": "✉️ Рассылка в ЛС",
     "stories": "👁 Stories + лайк",
     "subscribe": "📢 Подписка + просмотр",
+    "promo_chats": "📣 Промо в чатах",
 }
 
 

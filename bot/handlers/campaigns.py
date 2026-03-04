@@ -379,6 +379,61 @@ async def camp_msg_toggle(callback: CallbackQuery, db_user: dict):
     await callback.answer()
 
 
+# --- Привязка промо-чатов ---
+
+@router.callback_query(F.data.startswith("camp_pchats_"))
+async def camp_pchats(callback: CallbackQuery, db_user: dict):
+    camp_id = int(callback.data.split("_")[2])
+    chats = await fetch_all(
+        "SELECT id, username FROM promo_chats WHERE owner_user_id = ? ORDER BY id",
+        (db_user["telegram_id"],))
+    linked = await fetch_all(
+        "SELECT promo_chat_id FROM campaign_promo_chats WHERE campaign_id = ?",
+        (camp_id,))
+    selected_ids = {r["promo_chat_id"] for r in linked}
+
+    if not chats:
+        await callback.answer("Сначала добавьте промо-чаты", show_alert=True)
+        return
+
+    await callback.message.edit_text(
+        "📣 Выберите промо-чаты для кампании:",
+        reply_markup=camp_select_items_kb(chats, "camp_pchat", camp_id, selected_ids),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("camp_pchat_toggle_"))
+async def camp_pchat_toggle(callback: CallbackQuery, db_user: dict):
+    parts = callback.data.split("_")
+    camp_id = int(parts[3])
+    pchat_id = int(parts[4])
+
+    existing = await fetch_one(
+        "SELECT 1 FROM campaign_promo_chats WHERE campaign_id = ? AND promo_chat_id = ?",
+        (camp_id, pchat_id))
+    if existing:
+        await execute(
+            "DELETE FROM campaign_promo_chats WHERE campaign_id = ? AND promo_chat_id = ?",
+            (camp_id, pchat_id))
+    else:
+        await execute(
+            "INSERT INTO campaign_promo_chats (campaign_id, promo_chat_id) VALUES (?, ?)",
+            (camp_id, pchat_id))
+
+    chats = await fetch_all(
+        "SELECT id, username FROM promo_chats WHERE owner_user_id = ? ORDER BY id",
+        (db_user["telegram_id"],))
+    linked = await fetch_all(
+        "SELECT promo_chat_id FROM campaign_promo_chats WHERE campaign_id = ?",
+        (camp_id,))
+    selected_ids = {r["promo_chat_id"] for r in linked}
+
+    await callback.message.edit_reply_markup(
+        reply_markup=camp_select_items_kb(chats, "camp_pchat", camp_id, selected_ids))
+    await callback.answer()
+
+
 # --- Лимиты ---
 
 @router.callback_query(F.data.startswith("camp_limits_"))
@@ -453,6 +508,7 @@ async def camp_del_confirm(callback: CallbackQuery, db_user: dict):
     await execute("DELETE FROM campaign_channels WHERE campaign_id = ?", (camp_id,))
     await execute("DELETE FROM campaign_accounts WHERE campaign_id = ?", (camp_id,))
     await execute("DELETE FROM campaign_messages WHERE campaign_id = ?", (camp_id,))
+    await execute("DELETE FROM campaign_promo_chats WHERE campaign_id = ?", (camp_id,))
     await execute("DELETE FROM campaigns WHERE id = ?", (camp_id,))
     await callback.message.edit_text("✅ Кампания удалена.", reply_markup=campaigns_menu_kb())
     await callback.answer()

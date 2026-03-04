@@ -146,6 +146,35 @@ MIGRATIONS = [
             FOREIGN KEY (ticket_id) REFERENCES support_tickets(id) ON DELETE CASCADE
         )""",
     ],
+    # Migration 8: promo chats (Sprint 5 — CHAT-01)
+    [
+        """CREATE TABLE IF NOT EXISTS promo_chats (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id INTEGER,
+            username TEXT,
+            title TEXT,
+            min_delay INTEGER DEFAULT 300,
+            max_delay INTEGER DEFAULT 600,
+            max_posts_per_hour INTEGER DEFAULT 3,
+            max_posts_per_day INTEGER DEFAULT 10,
+            dedup_window_hours INTEGER DEFAULT 24,
+            is_active INTEGER DEFAULT 1,
+            allow_posting INTEGER DEFAULT 1,
+            error_count INTEGER DEFAULT 0,
+            last_post_at TEXT,
+            owner_user_id INTEGER,
+            added_at TEXT DEFAULT (datetime('now'))
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_promo_active ON promo_chats(is_active, allow_posting)",
+        """CREATE TABLE IF NOT EXISTS campaign_promo_chats (
+            campaign_id INTEGER NOT NULL,
+            promo_chat_id INTEGER NOT NULL,
+            PRIMARY KEY (campaign_id, promo_chat_id),
+            FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE,
+            FOREIGN KEY (promo_chat_id) REFERENCES promo_chats(id) ON DELETE CASCADE
+        )""",
+        "ALTER TABLE campaigns ADD COLUMN is_dry_run INTEGER DEFAULT 0",
+    ],
 ]
 
 

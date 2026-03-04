@@ -6,6 +6,7 @@ from services.commenter import run_campaign
 from services.story_viewer import run_story_campaign
 from services.subscriber import run_subscribe_campaign
 from services.dm_sender import run_dm_campaign
+from services.promo_chatter import run_promo_chat_campaign
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,7 @@ DISPATCH = {
     "dm": run_dm_campaign,
     "stories": run_story_campaign,
     "subscribe": run_subscribe_campaign,
+    "promo_chats": run_promo_chat_campaign,
 }
 
 

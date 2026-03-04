@@ -11,7 +11,7 @@ from core.scheduler import start_scheduler
 from bot.middlewares.access import UserAccessMiddleware
 from core.webhook_server import create_webhook_app, set_bot
 
-from bot.handlers import start, accounts, channels, messages, campaigns, settings, account_setup, presets, proxies, autoreg, payments
+from bot.handlers import start, accounts, channels, messages, campaigns, settings, account_setup, presets, proxies, autoreg, payments, promo_chats
 from bot.handlers.admin import admin_router
 
 logging.basicConfig(
@@ -51,6 +51,7 @@ async def main():
     work_router.include_router(presets.router)
     work_router.include_router(proxies.router)
     work_router.include_router(autoreg.router)
+    work_router.include_router(promo_chats.router)
     work_router.include_router(settings.router)
     dp.include_router(work_router)
 
