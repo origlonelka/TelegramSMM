@@ -590,3 +590,44 @@ def stats_sub_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="◀️ К статистике", callback_data="stats")],
     ])
+
+
+# --- Платежи ---
+
+def plans_list_kb(plans: list) -> InlineKeyboardMarkup:
+    """Plan selection keyboard."""
+    buttons = []
+    for plan in plans:
+        price = plan["price_rub"]
+        buttons.append([InlineKeyboardButton(
+            text=f"💎 {plan['name']} — {price} ₽",
+            callback_data=f"pay_plan_{plan['id']}"
+        )])
+    buttons.append([InlineKeyboardButton(
+        text="◀️ Назад", callback_data="back_main"
+    )])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def payment_created_kb(confirmation_url: str,
+                        payment_uuid: str) -> InlineKeyboardMarkup:
+    """Keyboard after payment is created: pay link + check button."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="💳 Оплатить", url=confirmation_url)],
+        [InlineKeyboardButton(
+            text="🔄 Проверить оплату",
+            callback_data=f"pay_check_{payment_uuid}")],
+        [InlineKeyboardButton(
+            text="❌ Отмена", callback_data="pay_cancel")],
+    ])
+
+
+def subscription_info_kb() -> InlineKeyboardMarkup:
+    """Keyboard for subscription info / expiry notifications."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="💳 Продлить подписку", callback_data="select_plan")],
+        [InlineKeyboardButton(
+            text="◀️ Главное меню", callback_data="back_main")],
+    ])

@@ -86,8 +86,3 @@ async def activate_trial(callback: CallbackQuery):
     await callback.answer()
 
 
-@router.callback_query(F.data == "select_plan")
-async def select_plan(callback: CallbackQuery):
-    # Placeholder — will be implemented in Sprint 3
-    await callback.answer(
-        "Тарифы будут доступны в ближайшее время", show_alert=True)

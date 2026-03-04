@@ -3,12 +3,15 @@ import logging
 from aiogram import Bot, Dispatcher, Router
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from core.config import BOT_TOKEN
+from aiohttp import web
+
+from core.config import BOT_TOKEN, WEBHOOK_PORT
 from db.database import init_db, close_db
 from core.scheduler import start_scheduler
 from bot.middlewares.access import UserAccessMiddleware
+from core.webhook_server import create_webhook_app, set_bot
 
-from bot.handlers import start, accounts, channels, messages, campaigns, settings, account_setup, presets, proxies, autoreg
+from bot.handlers import start, accounts, channels, messages, campaigns, settings, account_setup, presets, proxies, autoreg, payments
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,6 +32,9 @@ async def main():
     # /start — без middleware (обрабатывает trial/paywall сам)
     dp.include_router(start.router)
 
+    # Платежи — без middleware (пользователи без подписки должны иметь доступ)
+    dp.include_router(payments.router)
+
     # Рабочие роутеры — с UserAccessMiddleware (проверяет trial/подписку)
     work_router = Router(name="work")
     work_router.message.middleware(UserAccessMiddleware())
@@ -48,11 +54,21 @@ async def main():
     start_scheduler()
     logger.info("Планировщик запущен")
 
+    # Запуск webhook-сервера для YooKassa
+    set_bot(bot)
+    webhook_app = create_webhook_app()
+    runner = web.AppRunner(webhook_app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", WEBHOOK_PORT)
+    await site.start()
+    logger.info(f"Webhook server started on port {WEBHOOK_PORT}")
+
     # Запуск бота
     logger.info("Бот запущен")
     try:
         await dp.start_polling(bot)
     finally:
+        await runner.cleanup()
         await close_db()
 
 

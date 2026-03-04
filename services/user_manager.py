@@ -71,7 +71,7 @@ async def check_entitlement(telegram_id: int) -> dict:
     if status == "subscription_active":
         sub = await fetch_one(
             "SELECT expires_at FROM subscriptions "
-            "WHERE user_telegram_id = ? AND status = 'active' "
+            "WHERE user_telegram_id = ? AND status = 'succeeded' "
             "ORDER BY expires_at DESC LIMIT 1",
             (telegram_id,))
         if sub:

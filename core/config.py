@@ -12,5 +12,12 @@ SUPERADMIN_IDS = list(set(SUPERADMIN_IDS + ADMIN_IDS))
 API_ID = int(os.getenv("API_ID") or "0")
 API_HASH = os.getenv("API_HASH") or ""
 
+# YooKassa
+YOOKASSA_SHOP_ID = os.getenv("YOOKASSA_SHOP_ID", "")
+YOOKASSA_SECRET_KEY = os.getenv("YOOKASSA_SECRET_KEY", "")
+WEBHOOK_PORT = int(os.getenv("WEBHOOK_PORT", "8080"))
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
+BOT_URL = os.getenv("BOT_URL", "")
+
 DB_PATH = "data.db"
 SESSIONS_DIR = "sessions"

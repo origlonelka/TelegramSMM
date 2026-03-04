@@ -69,6 +69,48 @@ async def _reset_daily_limits():
     logger.info("Дневные лимиты сброшены")
 
 
+async def _check_subscription_expiry():
+    """Деактивирует истёкшие подписки."""
+    try:
+        from services.payment_manager import expire_subscriptions
+        await expire_subscriptions()
+    except Exception as e:
+        logger.error(f"Subscription expiry check failed: {e}")
+
+
+async def _send_expiry_notifications():
+    """Уведомляет пользователей об истекающих подписках (за 3 дня)."""
+    try:
+        from services.payment_manager import get_expiring_soon
+        expiring = await get_expiring_soon(days=3)
+        if not expiring:
+            return
+
+        from core.webhook_server import _bot_instance
+        if not _bot_instance:
+            return
+
+        from bot.keyboards.inline import subscription_info_kb
+        for sub in expiring:
+            try:
+                await _bot_instance.send_message(
+                    chat_id=sub["user_telegram_id"],
+                    text=(
+                        f"⏳ <b>Подписка скоро истечёт</b>\n\n"
+                        f"Ваш тариф «{sub['plan_name']}» действует до "
+                        f"{sub['expires_at'][:16]}.\n\n"
+                        f"Продлите подписку, чтобы не потерять доступ!"
+                    ),
+                    reply_markup=subscription_info_kb(),
+                    parse_mode="HTML",
+                )
+            except Exception as e:
+                logger.error(
+                    f"Failed to notify user {sub['user_telegram_id']}: {e}")
+    except Exception as e:
+        logger.error(f"Expiry notification failed: {e}")
+
+
 def start_scheduler():
     # Запускать кампании каждые 5 минут
     scheduler.add_job(_run_active_campaigns, "interval", minutes=5, id="campaigns")
@@ -76,6 +118,12 @@ def start_scheduler():
     scheduler.add_job(_reset_hourly_limits, "cron", minute=0, id="hourly_reset")
     # Сбрасывать дневные лимиты в полночь
     scheduler.add_job(_reset_daily_limits, "cron", hour=0, minute=0, id="daily_reset")
+    # Проверять истёкшие подписки каждый час (в :30)
+    scheduler.add_job(_check_subscription_expiry, "cron", minute=30,
+                      id="subscription_expiry")
+    # Уведомления об истечении подписки — ежедневно в 10:00
+    scheduler.add_job(_send_expiry_notifications, "cron", hour=10, minute=0,
+                      id="expiry_notifications")
 
     scheduler.start()
     logger.info("Планировщик запущен")

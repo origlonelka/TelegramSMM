@@ -65,6 +65,41 @@ MIGRATIONS = [
         "ALTER TABLE campaigns ADD COLUMN owner_user_id INTEGER",
         "ALTER TABLE presets ADD COLUMN owner_user_id INTEGER",
     ],
+    # Migration 6: subscription_plans + subscriptions (Sprint 3 — Payments)
+    [
+        """CREATE TABLE IF NOT EXISTS subscription_plans (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT UNIQUE NOT NULL,
+            name TEXT NOT NULL,
+            duration_days INTEGER NOT NULL,
+            price_rub INTEGER NOT NULL,
+            is_active INTEGER DEFAULT 1,
+            created_at TEXT DEFAULT (datetime('now'))
+        )""",
+        """CREATE TABLE IF NOT EXISTS subscriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_telegram_id INTEGER NOT NULL,
+            plan_id INTEGER NOT NULL,
+            payment_id TEXT UNIQUE,
+            yookassa_payment_id TEXT UNIQUE,
+            status TEXT NOT NULL DEFAULT 'pending',
+            amount_rub INTEGER NOT NULL,
+            started_at TEXT,
+            expires_at TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (user_telegram_id) REFERENCES users(telegram_id),
+            FOREIGN KEY (plan_id) REFERENCES subscription_plans(id)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_sub_user ON subscriptions(user_telegram_id)",
+        "CREATE INDEX IF NOT EXISTS idx_sub_status ON subscriptions(status)",
+        "CREATE INDEX IF NOT EXISTS idx_sub_yookassa ON subscriptions(yookassa_payment_id)",
+        """INSERT OR IGNORE INTO subscription_plans (code, name, duration_days, price_rub)
+           VALUES ('monthly', 'Месяц', 30, 990)""",
+        """INSERT OR IGNORE INTO subscription_plans (code, name, duration_days, price_rub)
+           VALUES ('quarterly', '3 месяца', 90, 2490)""",
+        """INSERT OR IGNORE INTO subscription_plans (code, name, duration_days, price_rub)
+           VALUES ('yearly', 'Год', 365, 7990)""",
+    ],
 ]
 
 
