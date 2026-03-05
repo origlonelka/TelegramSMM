@@ -67,9 +67,6 @@ async def stats(callback: CallbackQuery, db_user: dict):
         "SELECT COUNT(*) as cnt FROM campaigns WHERE is_active = 1 AND owner_user_id = ?", (uid,))
     preset_count = await fetch_one(
         "SELECT COUNT(*) as cnt FROM presets WHERE owner_user_id = ?", (uid,))
-    tpl_count = await fetch_one(
-        "SELECT COUNT(*) as cnt FROM account_templates")
-
     # Прокси (назначенные на аккаунты пользователя)
     prx_total = await fetch_one(
         "SELECT COUNT(*) as cnt FROM proxies WHERE account_id IN "

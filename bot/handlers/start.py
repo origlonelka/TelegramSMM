@@ -125,8 +125,8 @@ async def activate_trial(callback: CallbackQuery):
             "Выберите раздел:",
             reply_markup=main_menu_kb(),
             parse_mode="HTML")
+        await callback.answer()
     else:
         await callback.answer(result["error"], show_alert=True)
-    await callback.answer()
 
 

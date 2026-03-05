@@ -249,14 +249,19 @@ async def _give_referral_bonus(user_tg_id: int):
         (referrer_id,))
 
     if current_sub:
-        # Extend existing subscription
-        await execute(
-            "UPDATE subscriptions SET "
-            "expires_at = datetime(expires_at, '+' || ? || ' days') "
+        # Extend existing subscription (use subquery — SQLite doesn't support UPDATE...ORDER BY...LIMIT)
+        sub_to_extend = await fetch_one(
+            "SELECT id FROM subscriptions "
             "WHERE user_telegram_id = ? AND status = 'succeeded' "
             "AND expires_at > datetime('now') "
             "ORDER BY expires_at DESC LIMIT 1",
-            (REFERRAL_BONUS_DAYS, referrer_id))
+            (referrer_id,))
+        if sub_to_extend:
+            await execute(
+                "UPDATE subscriptions SET "
+                "expires_at = datetime(expires_at, '+' || ? || ' days') "
+                "WHERE id = ?",
+                (REFERRAL_BONUS_DAYS, sub_to_extend["id"]))
     else:
         # Give free access by updating user status and trial
         referrer = await fetch_one(

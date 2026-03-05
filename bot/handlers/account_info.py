@@ -40,7 +40,8 @@ def my_account_kb(has_active_sub: bool = False) -> InlineKeyboardMarkup:
 
 
 @router.callback_query(F.data == "my_account")
-async def my_account(callback: CallbackQuery):
+async def my_account(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
     user = callback.from_user
     db_user = await get_or_create_user(user.id, user.username, user.first_name)
     tg_id = db_user["telegram_id"]
@@ -81,8 +82,9 @@ async def my_account(callback: CallbackQuery):
     text += f"Статус: {status_text}\n"
     if sub:
         text += f"Тариф: {sub['plan_name']}\n"
-        text += f"Действует до: {sub['expires_at'][:16].replace('T', ' ')}\n"
-    elif ent["status"] == "trial_active":
+        if sub['expires_at']:
+            text += f"Действует до: {sub['expires_at'][:16].replace('T', ' ')}\n"
+    elif ent["status"] == "trial_active" and ent.get("expires_at"):
         text += f"Истекает: {ent['expires_at'][:16].replace('T', ' ')}\n"
     text += "\n"
 
@@ -165,7 +167,8 @@ async def my_referrals(callback: CallbackQuery):
 # --- Support tickets ---
 
 @router.callback_query(F.data == "my_tickets")
-async def my_tickets(callback: CallbackQuery):
+async def my_tickets(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
     user = callback.from_user
     db_user = await get_or_create_user(user.id, user.username, user.first_name)
     tg_id = db_user["telegram_id"]
@@ -202,7 +205,8 @@ async def my_tickets(callback: CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("my_ticket_"))
-async def my_ticket_view(callback: CallbackQuery):
+async def my_ticket_view(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
     ticket_id = int(callback.data.replace("my_ticket_", ""))
     ticket = await fetch_one(
         "SELECT * FROM support_tickets WHERE id = ?", (ticket_id,))
@@ -406,14 +410,19 @@ async def enter_promo_code(message: Message, state: FSMContext):
             (tg_id,))
 
         if current_sub:
-            # Extend existing subscription
-            await execute(
-                "UPDATE subscriptions SET "
-                "expires_at = datetime(expires_at, '+' || ? || ' days') "
+            # Extend existing subscription (use subquery — SQLite doesn't support UPDATE...ORDER BY...LIMIT)
+            sub_to_extend = await fetch_one(
+                "SELECT id FROM subscriptions "
                 "WHERE user_telegram_id = ? AND status = 'succeeded' "
                 "AND expires_at > datetime('now') "
                 "ORDER BY expires_at DESC LIMIT 1",
-                (bonus_days, tg_id))
+                (tg_id,))
+            if sub_to_extend:
+                await execute(
+                    "UPDATE subscriptions SET "
+                    "expires_at = datetime(expires_at, '+' || ? || ' days') "
+                    "WHERE id = ?",
+                    (bonus_days, sub_to_extend["id"]))
         else:
             # Give free access
             await execute(
