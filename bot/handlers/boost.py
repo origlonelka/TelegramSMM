@@ -238,8 +238,11 @@ async def boost_service_selected(callback: CallbackQuery, state: FSMContext):
 @router.message(BoostOrder.link)
 async def boost_enter_link(message: Message, state: FSMContext):
     link = message.text.strip()
-    if not link.startswith("http") and not link.startswith("@"):
-        await message.answer("❌ Введите корректную ссылку или @username:")
+    # LikeDrom принимает только ссылки, не @username
+    if link.startswith("@"):
+        link = f"https://t.me/{link.lstrip('@')}"
+    if not link.startswith("http"):
+        await message.answer("❌ Введите ссылку (например, https://t.me/channel):")
         return
 
     await state.update_data(link=link)
