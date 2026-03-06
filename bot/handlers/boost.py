@@ -91,8 +91,7 @@ async def boost_profile(callback: CallbackQuery):
         (user.id,))
 
     # Реферальная ссылка
-    from aiogram import Bot
-    bot = Bot.get_current()
+    bot = callback.bot
     me = await bot.get_me()
     ref_link = f"https://t.me/{me.username}?start=ref_{user.id}"
 
