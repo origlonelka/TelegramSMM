@@ -16,6 +16,10 @@ class SearchUser(StatesGroup):
     query = State()
 
 
+class GrantSub(StatesGroup):
+    days = State()
+
+
 def _check_role(admin: dict, min_role: str = "admin") -> bool:
     return ROLE_HIERARCHY.get(admin["role"], 0) >= ROLE_HIERARCHY.get(min_role, 99)
 
@@ -28,6 +32,8 @@ def user_info_kb(tg_id: int, status: str) -> InlineKeyboardMarkup:
     else:
         buttons.append([InlineKeyboardButton(
             text="🔒 Заблокировать", callback_data=f"adm_user_block_{tg_id}")])
+    buttons.append([InlineKeyboardButton(
+        text="💎 Выдать подписку", callback_data=f"adm_user_grant_sub_{tg_id}")])
     buttons.append([InlineKeyboardButton(
         text="🔄 Сбросить trial", callback_data=f"adm_user_reset_trial_{tg_id}")])
     buttons.append([InlineKeyboardButton(
@@ -72,11 +78,11 @@ async def user_search(message: Message, state: FSMContext):
         await message.answer("Пользователь не найден.")
         return
 
-    await _show_user_info(message, dict(user))
+    await _show_user_info(message, dict(user), edit=False)
 
 
-async def _show_user_info(target, user: dict):
-    """Show user info (works with both Message and CallbackQuery)."""
+async def _show_user_info(target, user: dict, edit: bool = True):
+    """Show user info. edit=True → edit_text, edit=False → answer (new message)."""
     subs = await fetch_all(
         "SELECT s.*, p.name as plan_name FROM subscriptions s "
         "LEFT JOIN subscription_plans p ON s.plan_id = p.id "
@@ -99,7 +105,7 @@ async def _show_user_info(target, user: dict):
     )
 
     kb = user_info_kb(user["telegram_id"], user["status"])
-    if hasattr(target, 'edit_text'):
+    if edit:
         await target.edit_text(text, reply_markup=kb, parse_mode="HTML")
     else:
         await target.answer(text, reply_markup=kb, parse_mode="HTML")
@@ -148,3 +154,105 @@ async def user_reset_trial(callback: CallbackQuery, admin: dict):
     user = await fetch_one("SELECT * FROM users WHERE telegram_id = ?", (tg_id,))
     if user:
         await _show_user_info(callback.message, dict(user))
+
+
+@router.callback_query(F.data.startswith("adm_user_view_"))
+async def user_view_by_id(callback: CallbackQuery, state: FSMContext, admin: dict):
+    await state.clear()
+    tg_id = int(callback.data.replace("adm_user_view_", ""))
+    user = await fetch_one("SELECT * FROM users WHERE telegram_id = ?", (tg_id,))
+    if not user:
+        await callback.answer("Пользователь не найден", show_alert=True)
+        return
+    await _show_user_info(callback.message, dict(user))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("adm_user_grant_sub_"))
+async def user_grant_sub_start(callback: CallbackQuery, state: FSMContext, admin: dict):
+    if not _check_role(admin, "admin"):
+        await callback.answer("Недостаточно прав", show_alert=True)
+        return
+    tg_id = int(callback.data.replace("adm_user_grant_sub_", ""))
+    await state.update_data(grant_tg_id=tg_id)
+    await state.set_state(GrantSub.days)
+    await callback.message.edit_text(
+        f"💎 <b>Выдача подписки</b>\n\n"
+        f"Пользователь: <code>{tg_id}</code>\n\n"
+        f"Выберите срок или введите количество дней:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="7 дней", callback_data="adm_grant_days_7"),
+             InlineKeyboardButton(text="30 дней", callback_data="adm_grant_days_30")],
+            [InlineKeyboardButton(text="90 дней", callback_data="adm_grant_days_90"),
+             InlineKeyboardButton(text="365 дней", callback_data="adm_grant_days_365")],
+            [InlineKeyboardButton(text="◀️ Отмена", callback_data=f"adm_user_view_{tg_id}")],
+        ]),
+        parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("adm_grant_days_"))
+async def user_grant_sub_quick(callback: CallbackQuery, state: FSMContext, admin: dict):
+    days = int(callback.data.replace("adm_grant_days_", ""))
+    data = await state.get_data()
+    tg_id = data.get("grant_tg_id")
+    if not tg_id:
+        await callback.answer("Ошибка, попробуйте заново", show_alert=True)
+        return
+    await state.clear()
+    await _grant_subscription(callback.message, admin, tg_id, days)
+    await callback.answer()
+
+
+@router.message(GrantSub.days)
+async def user_grant_sub_manual(message: Message, state: FSMContext, admin: dict):
+    if not message.text or not message.text.strip().isdigit():
+        await message.answer("❌ Введите число дней (или нажмите кнопку).")
+        return
+    days = int(message.text.strip())
+    if days < 1 or days > 3650:
+        await message.answer("❌ Введите от 1 до 3650 дней.")
+        return
+    data = await state.get_data()
+    tg_id = data.get("grant_tg_id")
+    if not tg_id:
+        await message.answer("Ошибка, попробуйте заново.")
+        return
+    await state.clear()
+    await _grant_subscription(message, admin, tg_id, days, edit=False)
+
+
+async def _grant_subscription(target, admin: dict, tg_id: int, days: int, edit: bool = True):
+    """Grant free subscription to user."""
+    current_sub = await fetch_one(
+        "SELECT id, expires_at FROM subscriptions "
+        "WHERE user_telegram_id = ? AND status = 'succeeded' "
+        "AND expires_at > datetime('now') "
+        "ORDER BY expires_at DESC LIMIT 1",
+        (tg_id,))
+
+    if current_sub:
+        await execute(
+            "UPDATE subscriptions SET "
+            "expires_at = datetime(expires_at, '+' || ? || ' days') "
+            "WHERE id = ?",
+            (days, current_sub["id"]))
+    else:
+        await execute(
+            "INSERT INTO subscriptions "
+            "(user_telegram_id, plan_id, payment_id, status, amount_rub, "
+            "started_at, expires_at) "
+            "VALUES (?, 1, 'admin_grant_' || ? || '_' || ?, 'succeeded', 0, "
+            "datetime('now'), datetime('now', '+' || ? || ' days'))",
+            (tg_id, admin["user_id"], tg_id, days))
+
+    await execute(
+        "UPDATE users SET status = 'subscription_active', "
+        "updated_at = datetime('now') WHERE telegram_id = ?",
+        (tg_id,))
+    await log_action(admin["user_id"], "subscription_granted", "user", tg_id,
+                     f"{days} days")
+
+    user = await fetch_one("SELECT * FROM users WHERE telegram_id = ?", (tg_id,))
+    if user:
+        await _show_user_info(target, dict(user), edit=edit)

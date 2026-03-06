@@ -20,19 +20,23 @@ logger = logging.getLogger(__name__)
 
 os.makedirs(SESSIONS_DIR, exist_ok=True)
 
-SMS_ACTIVATE_URL = "https://hero-sms.com/stubs/handler_api.php"
+FIVESIM_BASE = "https://5sim.net/v1"
 
 COUNTRIES = {
-    0: "🇷🇺 Россия",
-    1: "🇺🇦 Украина",
-    2: "🇰🇿 Казахстан",
-    6: "🇮🇩 Индонезия",
-    12: "🇺🇸 США",
-    16: "🇬🇧 Великобритания",
-    22: "🇮🇳 Индия",
-    56: "🇹🇷 Турция",
-    175: "🇧🇷 Бразилия",
-    187: "🇳🇬 Нигерия",
+    "russia": "🇷🇺 Россия",
+    "ukraine": "🇺🇦 Украина",
+    "kazakhstan": "🇰🇿 Казахстан",
+    "indonesia": "🇮🇩 Индонезия",
+    "usa": "🇺🇸 США",
+    "england": "🇬🇧 Великобритания",
+    "india": "🇮🇳 Индия",
+    "turkey": "🇹🇷 Турция",
+    "brazil": "🇧🇷 Бразилия",
+    "nigeria": "🇳🇬 Нигерия",
+    "philippines": "🇵🇭 Филиппины",
+    "mexico": "🇲🇽 Мексика",
+    "colombia": "🇨🇴 Колумбия",
+    "bangladesh": "🇧🇩 Бангладеш",
 }
 
 DEFAULT_NAMES = "{Алексей|Дмитрий|Иван|Сергей|Андрей|Михаил|Максим|Артём|Данил|Никита}"
@@ -53,82 +57,70 @@ async def set_setting(key: str, value: str):
         await execute("INSERT INTO bot_settings (key, value) VALUES (?, ?)", (key, value))
 
 
-# --- HeroSMS API ---
+# --- 5sim.net API ---
 
-async def _sms_request(params: dict) -> str:
+async def _fivesim_request(method: str, path: str,
+                           params: dict = None) -> dict | list:
+    """HTTP запрос к 5sim.net API. Возвращает JSON."""
     api_key = await get_setting("sms_api_key")
     if not api_key:
         raise Exception("SMS API ключ не настроен")
-    params["api_key"] = api_key
+    headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
+    url = f"{FIVESIM_BASE}{path}"
     async with aiohttp.ClientSession() as session:
-        async with session.get(SMS_ACTIVATE_URL, params=params, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-            return await resp.text()
+        if method == "GET":
+            async with session.get(url, headers=headers, params=params,
+                                   timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    raise Exception(f"5sim {resp.status}: {text}")
+                return await resp.json()
+        else:
+            async with session.post(url, headers=headers, params=params,
+                                    timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    raise Exception(f"5sim {resp.status}: {text}")
+                return await resp.json()
 
 
-_usd_rub_cache: dict = {"rate": None, "ts": 0}
+async def get_balance() -> float:
+    """Возвращает баланс в рублях."""
+    data = await _fivesim_request("GET", "/user/profile")
+    return float(data.get("balance", 0))
 
 
-async def _get_usd_rub() -> float:
-    """Курс USD→RUB через ЦБ РФ (кэш 1 час)."""
-    import time
-    now = time.time()
-    if _usd_rub_cache["rate"] and now - _usd_rub_cache["ts"] < 3600:
-        return _usd_rub_cache["rate"]
-    try:
-        url = "https://www.cbr-xml-daily.ru/daily_json.js"
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                data = await resp.json(content_type=None)
-                rate = float(data["Valute"]["USD"]["Value"])
-                _usd_rub_cache["rate"] = rate
-                _usd_rub_cache["ts"] = now
-                return rate
-    except Exception:
-        return _usd_rub_cache["rate"] or 90.0  # fallback
-
-
-async def get_balance() -> tuple[float, float]:
-    """Возвращает (баланс_usd, баланс_rub)."""
-    text = await _sms_request({"action": "getBalance"})
-    if text.startswith("ACCESS_BALANCE:"):
-        usd = float(text.split(":")[1])
-        rate = await _get_usd_rub()
-        return usd, usd * rate
-    raise Exception(f"Ошибка: {text}")
-
-
-async def _get_min_price(country: int = 0) -> float | None:
+async def _get_min_price(country: str = "russia") -> float | None:
     """Получает минимальную цену на номер Telegram в указанной стране."""
-    text = await _sms_request({
-        "action": "getPrices",
-        "service": "tg",
-        "country": str(country),
-    })
     try:
-        data = json.loads(text)
-        prices = []
-
-        def extract_prices(obj):
-            if isinstance(obj, dict):
-                if "cost" in obj:
-                    count = int(obj.get("count", 0))
-                    if count > 0:
-                        prices.append(float(obj["cost"]))
-                else:
-                    for v in obj.values():
-                        extract_prices(v)
-
-        extract_prices(data)
-        return min(prices) if prices else None
+        api_key = await get_setting("sms_api_key")
+        if not api_key:
+            return None
+        headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
+        url = f"{FIVESIM_BASE}/guest/prices?product=telegram&country={country}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers,
+                                   timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+                # Response: {country: {operator: {product: {cost, count}}}}
+                prices = []
+                if country in data:
+                    for operator, products in data[country].items():
+                        if "telegram" in products:
+                            info = products["telegram"]
+                            count = int(info.get("count", 0))
+                            if count > 0:
+                                prices.append(float(info["cost"]))
+                return min(prices) if prices else None
     except Exception:
         return None
 
 
-async def get_all_min_prices() -> dict[int, float]:
+async def get_all_min_prices() -> dict[str, float]:
     """Получает минимальные цены для всех стран параллельно."""
-    import asyncio
-
-    async def _fetch(code: int) -> tuple[int, float | None]:
+    async def _fetch(code: str) -> tuple[str, float | None]:
         price = await _get_min_price(code)
         return code, price
 
@@ -142,80 +134,98 @@ async def get_all_min_prices() -> dict[int, float]:
     return prices
 
 
-async def _buy_number(country: int = 0) -> dict:
-    min_price = await _get_min_price(country)
-
-    params = {
-        "action": "getNumber",
-        "service": "tg",
-        "country": str(country),
-    }
-    if min_price is not None:
-        params["maxPrice"] = str(min_price)
-
-    text = await _sms_request(params)
-    if text.startswith("ACCESS_NUMBER:"):
-        parts = text.split(":")
-        return {"activation_id": parts[1], "phone": "+" + parts[2]}
-    raise Exception(text)
+async def _buy_number(country: str = "russia") -> dict:
+    """Покупает номер для Telegram. Возвращает {order_id, phone}."""
+    data = await _fivesim_request(
+        "GET", f"/user/buy/activation/{country}/any/telegram")
+    order_id = data["id"]
+    phone = data["phone"]
+    # 5sim возвращает номер уже с +
+    if not phone.startswith("+"):
+        phone = "+" + phone
+    logger.info(f"5sim: куплен номер {phone} (order #{order_id})")
+    return {"activation_id": str(order_id), "phone": phone}
 
 
-async def _set_activation_status(activation_id: str, status: int) -> str:
-    result = await _sms_request({
-        "action": "setStatus",
-        "id": activation_id,
-        "status": str(status),
-    })
-    logger.info(f"setStatus(id={activation_id}, status={status}) → {result}")
-    return result
+async def _cancel_order(order_id: str):
+    """Отменяет заказ (возврат средств)."""
+    try:
+        await _fivesim_request("GET", f"/user/cancel/{order_id}")
+        logger.info(f"5sim: заказ #{order_id} отменён")
+    except Exception as e:
+        logger.warning(f"5sim: ошибка отмены #{order_id}: {e}")
 
 
-async def _wait_for_code(activation_id: str, timeout: int = 150) -> str | None:
-    """Ждёт SMS-код от сервиса. Polling каждые 3 секунды."""
+async def _finish_order(order_id: str):
+    """Завершает заказ (SMS получен, всё ок)."""
+    try:
+        await _fivesim_request("GET", f"/user/finish/{order_id}")
+        logger.info(f"5sim: заказ #{order_id} завершён")
+    except Exception as e:
+        logger.warning(f"5sim: ошибка завершения #{order_id}: {e}")
+
+
+async def _ban_order(order_id: str):
+    """Баним номер (номер оказался плохим)."""
+    try:
+        await _fivesim_request("GET", f"/user/ban/{order_id}")
+        logger.info(f"5sim: номер #{order_id} забанен")
+    except Exception as e:
+        logger.warning(f"5sim: ошибка бана #{order_id}: {e}")
+
+
+async def _wait_for_code(order_id: str, timeout: int = 150) -> str | None:
+    """Ждёт SMS-код. Polling /user/check/{id} каждые 3 секунды."""
     api_key = await get_setting("sms_api_key")
+    headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
+    url = f"{FIVESIM_BASE}/user/check/{order_id}"
+
     async with aiohttp.ClientSession() as session:
         for attempt in range(timeout // 3):
             try:
                 async with session.get(
-                    SMS_ACTIVATE_URL,
-                    params={
-                        "api_key": api_key,
-                        "action": "getStatus",
-                        "id": activation_id,
-                    },
+                    url, headers=headers,
                     timeout=aiohttp.ClientTimeout(total=10),
                 ) as resp:
-                    text = (await resp.text()).strip()
+                    if resp.status != 200:
+                        if attempt % 10 == 0:
+                            logger.debug(f"5sim check #{order_id}: HTTP {resp.status}")
+                        await asyncio.sleep(3)
+                        continue
 
-                    if text.startswith("STATUS_OK:"):
-                        code = text.split(":")[1].strip()
-                        logger.info(f"SMS-код получен для активации {activation_id}: {code}")
-                        return code
-                    if text == "STATUS_CANCEL":
-                        logger.warning(f"Активация {activation_id} отменена сервисом")
-                        return None
-                    if text in ("NO_ACTIVATION", "BAD_KEY", "BAD_ACTION"):
-                        logger.error(f"Ошибка getStatus для {activation_id}: {text}")
+                    data = await resp.json()
+                    status = data.get("status", "")
+                    sms_list = data.get("sms", [])
+
+                    if status == "RECEIVED" and sms_list:
+                        code = sms_list[0].get("code", "")
+                        if code:
+                            logger.info(f"SMS-код получен для #{order_id}: {code}")
+                            return code
+
+                    if status in ("CANCELED", "TIMEOUT", "BANNED"):
+                        logger.warning(f"5sim #{order_id}: статус {status}")
                         return None
 
-                    # STATUS_WAIT_CODE — штатно, ждём дальше
+                    # PENDING — ждём дальше
                     if attempt % 10 == 0:
-                        logger.debug(f"getStatus {activation_id}: {text} (попытка {attempt})")
+                        logger.debug(f"5sim check #{order_id}: {status} (попытка {attempt})")
 
             except Exception as e:
-                logger.warning(f"getStatus запрос упал для {activation_id}: {e}")
+                logger.warning(f"5sim check запрос упал для #{order_id}: {e}")
 
             await asyncio.sleep(3)
-    logger.warning(f"Таймаут ожидания SMS для активации {activation_id} ({timeout}с)")
+
+    logger.warning(f"Таймаут ожидания SMS для #{order_id} ({timeout}с)")
     return None
 
 
 # --- Регистрация ---
 
-MAX_NUMBER_ATTEMPTS = 3  # Сколько раз пробовать купить новый номер
+MAX_NUMBER_ATTEMPTS = 5
 
 
-async def register_one_account(country: int = 0,
+async def register_one_account(country: str = "russia",
                                 progress_callback=None) -> dict:
     """Полный цикл авторегистрации одного аккаунта.
 
@@ -249,7 +259,7 @@ async def register_one_account(country: int = 0,
             return {"ok": False, "error": f"Покупка номера: {e}"}
 
         phone = number_info["phone"]
-        activation_id = number_info["activation_id"]
+        order_id = number_info["activation_id"]
 
         if progress_callback:
             prefix = f"[{attempt}/{MAX_NUMBER_ATTEMPTS}] " if attempt > 1 else ""
@@ -286,7 +296,7 @@ async def register_one_account(country: int = 0,
                 except Exception as e:
                     logger.warning(f"Авторег {phone}: resend_code не удался: {e}")
 
-            # Всё ещё не SMS — номер занят, отменяем (до setStatus=1 — возврат денег)
+            # Всё ещё не SMS — номер занят, отменяем
             if code_type not in _SMS_TYPES:
                 logger.warning(
                     f"Авторег {phone}: код через {code_type.name}, номер уже занят "
@@ -297,33 +307,27 @@ async def register_one_account(country: int = 0,
                     pass
                 await _cleanup_account(acc_id, session_path)
 
-                # hero-sms разрешает отмену только через 2 минуты
                 if progress_callback:
                     await progress_callback(
                         f"⚠️ {phone} уже в Telegram (код через {code_type.name})\n"
-                        f"⏳ Жду 2 мин для возврата средств...")
-                await asyncio.sleep(120)
-                await _set_activation_status(activation_id, 8)
+                        f"↩️ Отменяю номер...")
+                await _cancel_order(order_id)
 
                 if progress_callback:
                     await progress_callback(
-                        f"⚠️ {phone} уже в Telegram (код через {code_type.name}), "
-                        f"беру другой номер...")
+                        f"⚠️ {phone} уже в Telegram, беру другой номер...")
                 continue  # следующая попытка
 
             phone_code_hash = sent_code.phone_code_hash
-
-            # SMS подтверждён — теперь сообщаем сервису что готовы принять код
-            await _set_activation_status(activation_id, 1)
 
             if progress_callback:
                 await progress_callback(f"📱 {phone}\n📨 SMS\n⏳ Жду код...")
 
             # Ждём код
-            code = await _wait_for_code(activation_id, timeout=150)
+            code = await _wait_for_code(order_id, timeout=150)
 
             if not code:
-                await _set_activation_status(activation_id, 8)
+                await _cancel_order(order_id)
                 try:
                     await client.disconnect()
                 except Exception:
@@ -334,7 +338,7 @@ async def register_one_account(country: int = 0,
             if progress_callback:
                 await progress_callback(f"📱 {phone}\n🔑 Код получен, регистрирую...")
 
-            # 5. Входим / регистрируемся
+            # Входим / регистрируемся
             is_new = False
             try:
                 await client.sign_in(phone, phone_code_hash, code)
@@ -345,7 +349,7 @@ async def register_one_account(country: int = 0,
                     await client.sign_up(phone, phone_code_hash, first_name)
                     is_new = True
                 elif isinstance(e, SessionPasswordNeeded):
-                    await _set_activation_status(activation_id, 6)
+                    await _finish_order(order_id)
                     try:
                         await client.disconnect()
                     except Exception:
@@ -357,7 +361,7 @@ async def register_one_account(country: int = 0,
 
             await client.disconnect()
 
-            # 6. Успех — обновляем БД
+            # Успех — обновляем БД
             await execute(
                 "UPDATE accounts SET status = 'active', session_file = ? WHERE id = ?",
                 (session_path + ".session", acc_id),
@@ -368,7 +372,7 @@ async def register_one_account(country: int = 0,
                     "UPDATE proxies SET account_id = ? WHERE id = ?",
                     (acc_id, proxy_row["id"]))
 
-            await _set_activation_status(activation_id, 6)
+            await _finish_order(order_id)
 
             logger.info(
                 f"Авторег: {phone} (#{acc_id}) — "
@@ -382,7 +386,7 @@ async def register_one_account(country: int = 0,
             }
 
         except FloodWait as e:
-            await _set_activation_status(activation_id, 8)
+            await _cancel_order(order_id)
             try:
                 await client.disconnect()
             except Exception:
@@ -391,31 +395,29 @@ async def register_one_account(country: int = 0,
             return {"ok": False, "error": f"FloodWait: подождите {e.value} сек"}
 
         except PhoneNumberBanned:
-            await _set_activation_status(activation_id, 8)
+            await _ban_order(order_id)
             try:
                 await client.disconnect()
             except Exception:
                 pass
             await _cleanup_account(acc_id, session_path)
-            # Забаненный номер — пробуем следующий
             if progress_callback:
                 await progress_callback(f"⚠️ {phone} забанен, беру другой номер...")
             continue
 
         except PhoneNumberInvalid:
-            await _set_activation_status(activation_id, 8)
+            await _ban_order(order_id)
             try:
                 await client.disconnect()
             except Exception:
                 pass
             await _cleanup_account(acc_id, session_path)
-            # Невалидный номер — пробуем следующий
             if progress_callback:
                 await progress_callback(f"⚠️ {phone} невалидный, беру другой номер...")
             continue
 
         except Exception as e:
-            await _set_activation_status(activation_id, 8)
+            await _cancel_order(order_id)
             try:
                 await client.disconnect()
             except Exception:

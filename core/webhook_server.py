@@ -5,7 +5,7 @@ import logging
 from aiohttp import web
 
 from core.config import WEBHOOK_SECRET
-from services.payment_manager import process_webhook
+from services.payment_manager import process_webhook, process_topup_webhook
 
 logger = logging.getLogger(__name__)
 
@@ -41,27 +41,55 @@ async def handle_webhook(request: web.Request) -> web.Response:
     if not yookassa_payment_id:
         return web.Response(status=400, text="Missing payment ID")
 
-    logger.info(f"Processing webhook for payment {yookassa_payment_id}")
-    result = await process_webhook(yookassa_payment_id)
+    # Determine payment type from metadata
+    metadata = payment_obj.get("metadata", {}) or {}
+    payment_type = metadata.get("type", "subscription")
 
-    if result.get("ok") and not result.get("already_processed"):
-        user_tg_id = result.get("user_telegram_id")
-        if _bot_instance and user_tg_id:
-            try:
-                from bot.keyboards.inline import main_menu_kb
-                plan_name = result.get("plan_name", "")
-                await _bot_instance.send_message(
-                    chat_id=user_tg_id,
-                    text=(
-                        f"✅ <b>Оплата прошла успешно!</b>\n\n"
-                        f"Тариф: {plan_name}\n"
-                        f"Спасибо за подписку! Выберите раздел:"
-                    ),
-                    reply_markup=main_menu_kb(),
-                    parse_mode="HTML",
-                )
-            except Exception as e:
-                logger.error(f"Failed to notify user {user_tg_id}: {e}")
+    logger.info(f"Processing webhook for payment {yookassa_payment_id} (type={payment_type})")
+
+    if payment_type == "topup":
+        result = await process_topup_webhook(yookassa_payment_id)
+
+        if result.get("ok") and not result.get("already_processed"):
+            user_tg_id = result.get("user_telegram_id")
+            amount = result.get("amount", 0)
+            if _bot_instance and user_tg_id:
+                try:
+                    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+                    kb = InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(
+                            text="🚀 К накрутке", callback_data="back_boost")]])
+                    text = f"✅ <b>Баланс пополнен!</b>\n\n💰 Зачислено: {amount:.2f} ₽"
+                    if result.get("referral_bonus"):
+                        text += (
+                            f"\n\n🎁 Реферальный бонус {result['referral_bonus']:.2f} ₽ "
+                            f"начислен вашему другу!")
+                    await _bot_instance.send_message(
+                        chat_id=user_tg_id, text=text,
+                        reply_markup=kb, parse_mode="HTML")
+                except Exception as e:
+                    logger.error(f"Failed to notify user {user_tg_id}: {e}")
+    else:
+        result = await process_webhook(yookassa_payment_id)
+
+        if result.get("ok") and not result.get("already_processed"):
+            user_tg_id = result.get("user_telegram_id")
+            if _bot_instance and user_tg_id:
+                try:
+                    from bot.keyboards.inline import main_menu_kb
+                    plan_name = result.get("plan_name", "")
+                    await _bot_instance.send_message(
+                        chat_id=user_tg_id,
+                        text=(
+                            f"✅ <b>Оплата прошла успешно!</b>\n\n"
+                            f"Тариф: {plan_name}\n"
+                            f"Спасибо за подписку! Выберите раздел:"
+                        ),
+                        reply_markup=main_menu_kb(),
+                        parse_mode="HTML",
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to notify user {user_tg_id}: {e}")
 
     if result.get("ok"):
         return web.Response(status=200, text="OK")

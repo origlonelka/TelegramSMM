@@ -1,8 +1,22 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 
-def main_menu_kb(is_admin: bool = False) -> InlineKeyboardMarkup:
+def platform_menu_kb(is_admin: bool = False) -> InlineKeyboardMarkup:
+    """Главное меню — выбор платформы."""
     buttons = [
+        [InlineKeyboardButton(text="📱 Telegram", callback_data="platform_telegram")],
+        [InlineKeyboardButton(text="📷 Instagram", callback_data="platform_instagram")],
+        [InlineKeyboardButton(text="🚀 Накрутка", callback_data="platform_boost")],
+    ]
+    if is_admin:
+        buttons.append([InlineKeyboardButton(
+            text="🛠 Админ-панель", callback_data="admin_panel")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def telegram_menu_kb() -> InlineKeyboardMarkup:
+    """Меню Telegram SMM (бывшее main_menu)."""
+    return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📱 Аккаунты", callback_data="accounts"),
          InlineKeyboardButton(text="📢 Каналы", callback_data="channels")],
         [InlineKeyboardButton(text="💬 Сообщения", callback_data="messages"),
@@ -12,11 +26,13 @@ def main_menu_kb(is_admin: bool = False) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="⚙️ Настройки", callback_data="settings"),
          InlineKeyboardButton(text="📊 Статистика", callback_data="stats")],
         [InlineKeyboardButton(text="👤 Мой аккаунт", callback_data="my_account")],
-    ]
-    if is_admin:
-        buttons.append([InlineKeyboardButton(
-            text="🛠 Админ-панель", callback_data="admin_panel")])
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="back_platform")],
+    ])
+
+
+def main_menu_kb(is_admin: bool = False) -> InlineKeyboardMarkup:
+    """Legacy — перенаправляет на platform_menu_kb."""
+    return platform_menu_kb(is_admin=is_admin)
 
 
 def paywall_kb(show_trial: bool = False) -> InlineKeyboardMarkup:
@@ -498,13 +514,13 @@ def autoreg_menu_kb() -> InlineKeyboardMarkup:
     ])
 
 
-def autoreg_country_kb(current_country: int,
-                       prices: dict[int, float] | None = None) -> InlineKeyboardMarkup:
+def autoreg_country_kb(current_country: str,
+                       prices: dict[str, float] | None = None) -> InlineKeyboardMarkup:
     from services.autoreg import COUNTRIES
     buttons = []
     for code, name in COUNTRIES.items():
         check = "✅ " if code == current_country else ""
-        price_text = f" (${prices[code]:.2f})" if prices and code in prices else ""
+        price_text = f" ({prices[code]:.1f}₽)" if prices and code in prices else ""
         buttons.append([InlineKeyboardButton(
             text=f"{check}{name}{price_text}",
             callback_data=f"areg_setcountry_{code}"

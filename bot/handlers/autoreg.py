@@ -27,15 +27,15 @@ async def autoreg_menu(callback: CallbackQuery, state: FSMContext):
     api_key = await get_setting("sms_api_key")
     key_status = "✅ Настроен" if api_key else "❌ Не настроен"
 
-    country = int(await get_setting("autoreg_country") or "0")
-    country_name = COUNTRIES.get(country, f"#{country}")
+    country = await get_setting("autoreg_country") or "russia"
+    country_name = COUNTRIES.get(country, country)
     count = int(await get_setting("autoreg_count") or "1")
 
     balance_text = ""
     if api_key:
         try:
-            usd, rub = await get_balance()
-            balance_text = f"\n💰 Баланс: {rub:.2f} ₽ (${usd:.2f})"
+            rub = await get_balance()
+            balance_text = f"\n💰 Баланс: {rub:.2f} ₽"
         except Exception:
             balance_text = "\n💰 Баланс: ошибка"
 
@@ -44,7 +44,7 @@ async def autoreg_menu(callback: CallbackQuery, state: FSMContext):
         f"SMS-сервис: {key_status}{balance_text}\n"
         f"🌍 Страна: {country_name}\n"
         f"🔢 Количество: {count}\n\n"
-        f"Используется hero-sms.com для получения SMS.\n"
+        f"Используется 5sim.net для получения SMS.\n"
         f"Прокси из пула назначаются автоматически."
     )
     await callback.message.edit_text(
@@ -58,9 +58,9 @@ async def autoreg_menu(callback: CallbackQuery, state: FSMContext):
 async def areg_set_key_start(callback: CallbackQuery, state: FSMContext):
     await state.set_state(SetSmsKey.key)
     await callback.message.edit_text(
-        "🔑 <b>HeroSMS API ключ</b>\n\n"
-        "Получите ключ на <b>hero-sms.com</b>:\n"
-        "Профиль → API → Скопировать ключ\n\n"
+        "🔑 <b>5sim.net API ключ</b>\n\n"
+        "Получите ключ на <b>5sim.net</b>:\n"
+        "Профиль → Настройки → API ключ\n\n"
         "Вставьте ключ:",
         reply_markup=back_kb("autoreg"),
         parse_mode="HTML",
@@ -82,9 +82,9 @@ async def areg_set_key_value(message: Message, state: FSMContext):
     # Проверяем ключ
     from services.autoreg import get_balance
     try:
-        usd, rub = await get_balance()
+        rub = await get_balance()
         await message.answer(
-            f"✅ Ключ сохранён!\n💰 Баланс: {rub:.2f} ₽ (${usd:.2f})",
+            f"✅ Ключ сохранён!\n💰 Баланс: {rub:.2f} ₽",
             reply_markup=autoreg_menu_kb(),
         )
     except Exception as e:
@@ -100,7 +100,7 @@ async def areg_set_key_value(message: Message, state: FSMContext):
 @router.callback_query(F.data == "areg_country")
 async def areg_country(callback: CallbackQuery):
     from services.autoreg import get_setting, get_all_min_prices
-    current = int(await get_setting("autoreg_country") or "0")
+    current = await get_setting("autoreg_country") or "russia"
     prices = await get_all_min_prices()
     await callback.message.edit_text(
         "🌍 Выберите страну для покупки номеров:",
@@ -111,9 +111,9 @@ async def areg_country(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("areg_setcountry_"))
 async def areg_setcountry(callback: CallbackQuery):
-    country = int(callback.data.split("_")[2])
+    country = callback.data.replace("areg_setcountry_", "")
     from services.autoreg import set_setting, COUNTRIES, get_all_min_prices
-    await set_setting("autoreg_country", str(country))
+    await set_setting("autoreg_country", country)
     await callback.answer(f"✅ Страна: {COUNTRIES.get(country, '?')}")
 
     prices = await get_all_min_prices()
@@ -166,11 +166,11 @@ async def areg_start(callback: CallbackQuery):
         await callback.answer("❌ Сначала настройте SMS API ключ", show_alert=True)
         return
 
-    country = int(await get_setting("autoreg_country") or "0")
+    country = await get_setting("autoreg_country") or "russia"
     count = int(await get_setting("autoreg_count") or "1")
 
     from services.autoreg import COUNTRIES
-    country_name = COUNTRIES.get(country, f"#{country}")
+    country_name = COUNTRIES.get(country, country)
 
     await callback.message.edit_text(
         f"🤖 <b>Авторегистрация</b>\n\n"
@@ -230,7 +230,7 @@ async def areg_start(callback: CallbackQuery):
 async def areg_balance(callback: CallbackQuery):
     from services.autoreg import get_balance
     try:
-        usd, rub = await get_balance()
-        await callback.answer(f"💰 Баланс: {rub:.2f} ₽ (${usd:.2f})", show_alert=True)
+        rub = await get_balance()
+        await callback.answer(f"💰 Баланс: {rub:.2f} ₽", show_alert=True)
     except Exception as e:
         await callback.answer(f"❌ {e}", show_alert=True)

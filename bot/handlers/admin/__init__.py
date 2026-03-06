@@ -2,7 +2,7 @@
 from aiogram import Router
 from bot.middlewares.admin import AdminMiddleware
 
-from . import roles, users, finance, operations, promos, support, audit
+from . import roles, users, finance, operations, promos, support, audit, boost_admin
 
 admin_router = Router(name="admin")
 admin_router.message.middleware(AdminMiddleware(min_role="support"))
@@ -15,3 +15,4 @@ admin_router.include_router(users.router)         # user management — admin+
 admin_router.include_router(promos.router)        # promo codes — admin+
 admin_router.include_router(audit.router)         # audit logs — admin+
 admin_router.include_router(roles.router)         # role management — superadmin only
+admin_router.include_router(boost_admin.router)   # boost settings — admin+

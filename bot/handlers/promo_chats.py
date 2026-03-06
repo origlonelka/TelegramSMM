@@ -1,4 +1,6 @@
 """Promo chats management: add, list, remove, settings, link to campaigns."""
+import re
+
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
@@ -10,6 +12,7 @@ router = Router()
 
 class AddPromoChat(StatesGroup):
     username = State()
+    bulk = State()
 
 
 class SetChatLimit(StatesGroup):
@@ -20,7 +23,8 @@ class SetChatLimit(StatesGroup):
 
 def promo_chats_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Добавить чат", callback_data="pchat_add")],
+        [InlineKeyboardButton(text="➕ Добавить чат", callback_data="pchat_add"),
+         InlineKeyboardButton(text="📥 Массово", callback_data="pchat_add_bulk")],
         [InlineKeyboardButton(text="📋 Список чатов", callback_data="pchat_list")],
         [InlineKeyboardButton(text="◀️ Главное меню", callback_data="back_main")],
     ])
@@ -152,6 +156,123 @@ async def pchat_add_username(message: Message, state: FSMContext, db_user: dict)
     await message.answer(
         f"✅ Промо-чат @{username} добавлен (#{pchat_id}).",
         reply_markup=promo_chat_item_kb(pchat_id, True))
+
+
+# --- Bulk add ---
+
+def _parse_usernames(text: str) -> list[str]:
+    """Extract usernames from text. Supports t.me/ links, @mentions, comma/space/newline separated."""
+    # Extract from t.me links: t.me/username, https://t.me/username
+    links = re.findall(r'(?:https?://)?t\.me/([A-Za-z0-9_]{3,})', text)
+    # Remove t.me links from text to avoid double-parsing
+    cleaned = re.sub(r'(?:https?://)?t\.me/[A-Za-z0-9_]+', ' ', text)
+    # Split by commas, spaces, newlines
+    tokens = re.split(r'[,\s]+', cleaned)
+    # Clean: strip @, filter valid usernames
+    names = []
+    for t in tokens:
+        t = t.strip().lstrip('@')
+        if t and re.match(r'^[A-Za-z0-9_]{3,}$', t):
+            names.append(t)
+    # Combine links + tokens, deduplicate preserving order
+    seen = set()
+    result = []
+    for name in links + names:
+        lower = name.lower()
+        if lower not in seen:
+            seen.add(lower)
+            result.append(name)
+    return result
+
+
+@router.callback_query(F.data == "pchat_add_bulk")
+async def pchat_add_bulk_start(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(AddPromoChat.bulk)
+    await callback.message.edit_text(
+        "📥 <b>Массовое добавление чатов</b>\n\n"
+        "Отправьте список чатов одним из способов:\n"
+        "• Текстом — юзернеймы через запятую, пробел или каждый с новой строки\n"
+        "• Ссылками — t.me/username\n"
+        "• Файлом .txt со списком\n\n"
+        "Пример:\n<code>chat1, chat2, chat3</code>\n"
+        "или\n<code>https://t.me/chat1\nhttps://t.me/chat2</code>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Отмена", callback_data="promo_chats")],
+        ]),
+        parse_mode="HTML")
+    await callback.answer()
+
+
+@router.message(AddPromoChat.bulk, F.document)
+async def pchat_add_bulk_file(message: Message, state: FSMContext, db_user: dict):
+    """Handle .txt file upload for bulk add."""
+    doc = message.document
+    if doc.file_size and doc.file_size > 1_000_000:
+        await message.answer("❌ Файл слишком большой (макс. 1 МБ).")
+        return
+
+    file = await message.bot.download(doc)
+    try:
+        text = file.read().decode("utf-8", errors="ignore")
+    except Exception:
+        await message.answer("❌ Не удалось прочитать файл.")
+        return
+
+    usernames = _parse_usernames(text)
+    if not usernames:
+        await message.answer("❌ Не найдено ни одного юзернейма в файле.")
+        return
+
+    await _bulk_add_chats(message, state, db_user, usernames)
+
+
+@router.message(AddPromoChat.bulk)
+async def pchat_add_bulk_text(message: Message, state: FSMContext, db_user: dict):
+    """Handle text message for bulk add."""
+    if not message.text:
+        await message.answer("❌ Отправьте текст с юзернеймами или .txt файл.")
+        return
+
+    usernames = _parse_usernames(message.text)
+    if not usernames:
+        await message.answer("❌ Не найдено ни одного юзернейма. Проверьте формат.")
+        return
+
+    await _bulk_add_chats(message, state, db_user, usernames)
+
+
+async def _bulk_add_chats(message: Message, state: FSMContext, db_user: dict, usernames: list[str]):
+    """Insert multiple promo chats, report results."""
+    await state.clear()
+    owner_id = db_user["telegram_id"]
+
+    added = 0
+    skipped = 0
+    for username in usernames:
+        existing = await fetch_one(
+            "SELECT id FROM promo_chats WHERE username = ? AND owner_user_id = ?",
+            (username, owner_id))
+        if existing:
+            skipped += 1
+            continue
+        await execute_returning(
+            "INSERT INTO promo_chats (username, owner_user_id) VALUES (?, ?)",
+            (username, owner_id))
+        added += 1
+
+    total = len(usernames)
+    text = (
+        f"📥 <b>Массовое добавление завершено</b>\n\n"
+        f"Найдено: {total}\n"
+        f"✅ Добавлено: {added}\n"
+    )
+    if skipped:
+        text += f"⏭ Уже были: {skipped}\n"
+
+    await message.answer(
+        text,
+        reply_markup=promo_chats_menu_kb(),
+        parse_mode="HTML")
 
 
 # --- Toggle ---

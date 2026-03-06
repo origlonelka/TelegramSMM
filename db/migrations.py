@@ -175,6 +175,49 @@ MIGRATIONS = [
         )""",
         "ALTER TABLE campaigns ADD COLUMN is_dry_run INTEGER DEFAULT 0",
     ],
+    # Migration 9: Boost (накрутка) — баланс, заказы, сервисы
+    [
+        "ALTER TABLE users ADD COLUMN balance_rub REAL DEFAULT 0",
+        """CREATE TABLE IF NOT EXISTS boost_orders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_telegram_id INTEGER NOT NULL,
+            likedrom_order_id INTEGER,
+            service_id INTEGER NOT NULL,
+            service_name TEXT,
+            link TEXT NOT NULL,
+            quantity INTEGER NOT NULL,
+            price_rub REAL NOT NULL,
+            cost_rub REAL NOT NULL,
+            status TEXT DEFAULT 'pending',
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_boost_orders_user ON boost_orders(user_telegram_id)",
+        "CREATE INDEX IF NOT EXISTS idx_boost_orders_status ON boost_orders(status)",
+        """CREATE TABLE IF NOT EXISTS balance_topups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_telegram_id INTEGER NOT NULL,
+            amount_rub REAL NOT NULL,
+            yookassa_payment_id TEXT UNIQUE,
+            payment_uuid TEXT UNIQUE,
+            status TEXT DEFAULT 'pending',
+            created_at TEXT DEFAULT (datetime('now'))
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_topups_user ON balance_topups(user_telegram_id)",
+        """CREATE TABLE IF NOT EXISTS boost_services (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            category TEXT,
+            network TEXT,
+            min_qty INTEGER,
+            max_qty INTEGER,
+            cost_per_1k REAL,
+            price_per_1k REAL,
+            is_active INTEGER DEFAULT 1,
+            updated_at TEXT DEFAULT (datetime('now'))
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_boost_svc_net ON boost_services(network, is_active)",
+    ],
 ]
 
 

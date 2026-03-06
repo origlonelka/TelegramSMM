@@ -2,7 +2,7 @@ from aiogram import Router, F
 from aiogram.filters import CommandStart
 from aiogram.types import Message, CallbackQuery
 
-from bot.keyboards.inline import main_menu_kb, paywall_kb
+from bot.keyboards.inline import platform_menu_kb, paywall_kb
 from db.database import execute, fetch_one
 from services.user_manager import get_or_create_user, start_trial, check_entitlement
 
@@ -59,7 +59,7 @@ async def cmd_start(message: Message):
     if is_admin:
         await message.answer(
             WELCOME_TEXT,
-            reply_markup=main_menu_kb(is_admin=True),
+            reply_markup=platform_menu_kb(is_admin=True),
             parse_mode="HTML")
         return
 
@@ -68,7 +68,7 @@ async def cmd_start(message: Message):
     if ent["allowed"]:
         await message.answer(
             WELCOME_TEXT,
-            reply_markup=main_menu_kb(),
+            reply_markup=platform_menu_kb(),
             parse_mode="HTML")
     elif db_user["status"] == "new":
         await message.answer(
@@ -93,7 +93,7 @@ async def back_to_main(callback: CallbackQuery):
     if is_admin:
         await callback.message.edit_text(
             WELCOME_TEXT,
-            reply_markup=main_menu_kb(is_admin=True),
+            reply_markup=platform_menu_kb(is_admin=True),
             parse_mode="HTML")
         await callback.answer()
         return
@@ -102,7 +102,7 @@ async def back_to_main(callback: CallbackQuery):
     if ent["allowed"]:
         await callback.message.edit_text(
             WELCOME_TEXT,
-            reply_markup=main_menu_kb(),
+            reply_markup=platform_menu_kb(),
             parse_mode="HTML")
     else:
         db_user = await get_or_create_user(
@@ -123,7 +123,7 @@ async def activate_trial(callback: CallbackQuery):
             "🎉 <b>Пробный период активирован!</b>\n\n"
             "У вас есть 24 часа полного доступа.\n"
             "Выберите раздел:",
-            reply_markup=main_menu_kb(),
+            reply_markup=platform_menu_kb(),
             parse_mode="HTML")
         await callback.answer()
     else:

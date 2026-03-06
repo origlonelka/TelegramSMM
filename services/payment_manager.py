@@ -299,6 +299,158 @@ async def _give_referral_bonus(user_tg_id: int):
         pass
 
 
+async def create_topup_payment(user_telegram_id: int, amount: float) -> dict:
+    """Create a YooKassa payment for balance topup.
+
+    Returns: {"ok": bool, "confirmation_url": str, "payment_id": str}
+    """
+    if amount < 50:
+        return {"ok": False, "error": "Минимальная сумма 50 ₽"}
+
+    payment_uuid = str(uuid.uuid4())
+
+    await execute(
+        "INSERT INTO balance_topups "
+        "(user_telegram_id, amount_rub, payment_uuid, status) "
+        "VALUES (?, ?, ?, 'pending')",
+        (user_telegram_id, amount, payment_uuid)
+    )
+
+    _configure_yookassa()
+    loop = asyncio.get_event_loop()
+    try:
+        return_url = BOT_URL or "https://t.me"
+        yookassa_payment = await loop.run_in_executor(None, lambda: Payment.create(
+            {
+                "amount": {
+                    "value": str(Decimal(str(amount))),
+                    "currency": "RUB"
+                },
+                "confirmation": {
+                    "type": "redirect",
+                    "return_url": return_url
+                },
+                "capture": True,
+                "description": f"Пополнение баланса TelegramSMM: {amount:.0f} ₽",
+                "metadata": {
+                    "type": "topup",
+                    "user_telegram_id": str(user_telegram_id),
+                    "payment_uuid": payment_uuid,
+                }
+            },
+            idempotency_key=payment_uuid
+        ))
+    except Exception as e:
+        logger.error(f"YooKassa topup payment creation failed: {e}")
+        await execute(
+            "UPDATE balance_topups SET status = 'cancelled' "
+            "WHERE payment_uuid = ?", (payment_uuid,))
+        return {"ok": False, "error": f"Ошибка создания платежа: {e}"}
+
+    await execute(
+        "UPDATE balance_topups SET yookassa_payment_id = ? "
+        "WHERE payment_uuid = ?",
+        (yookassa_payment.id, payment_uuid)
+    )
+
+    return {
+        "ok": True,
+        "confirmation_url": yookassa_payment.confirmation.confirmation_url,
+        "payment_id": payment_uuid,
+    }
+
+
+async def process_topup_webhook(yookassa_payment_id: str) -> dict:
+    """Process a YooKassa payment.succeeded webhook for balance topup."""
+    existing = await fetch_one(
+        "SELECT * FROM balance_topups WHERE yookassa_payment_id = ?",
+        (yookassa_payment_id,))
+
+    if existing and existing["status"] == "succeeded":
+        return {"ok": True, "already_processed": True,
+                "user_telegram_id": existing["user_telegram_id"]}
+
+    if not existing:
+        _configure_yookassa()
+        loop = asyncio.get_event_loop()
+        try:
+            yp = await loop.run_in_executor(
+                None, lambda: Payment.find_one(yookassa_payment_id))
+        except Exception as e:
+            logger.error(f"YooKassa find_one (topup) failed: {e}")
+            return {"ok": False, "error": str(e)}
+
+        if yp.status != "succeeded":
+            return {"ok": False, "error": f"Payment status: {yp.status}"}
+
+        meta = yp.metadata or {}
+        puuid = meta.get("payment_uuid")
+        if puuid:
+            existing = await fetch_one(
+                "SELECT * FROM balance_topups WHERE payment_uuid = ?", (puuid,))
+        if not existing:
+            logger.warning(f"Topup webhook for unknown payment {yookassa_payment_id}")
+            return {"ok": False, "error": "Topup not found"}
+
+    topup = dict(existing)
+    user_tg_id = topup["user_telegram_id"]
+    amount = float(topup["amount_rub"])
+
+    await execute(
+        "UPDATE balance_topups SET status = 'succeeded' "
+        "WHERE id = ?", (topup["id"],))
+
+    from services.boost_manager import topup_balance
+    ref_result = await topup_balance(user_tg_id, amount)
+
+    result = {
+        "ok": True,
+        "already_processed": False,
+        "user_telegram_id": user_tg_id,
+        "amount": amount,
+    }
+    if ref_result:
+        result["referrer_id"] = ref_result["referrer_id"]
+        result["referral_bonus"] = ref_result["bonus"]
+    return result
+
+
+async def check_topup_status(payment_uuid: str) -> dict:
+    """Manual check of topup payment status via YooKassa API."""
+    topup = await fetch_one(
+        "SELECT * FROM balance_topups WHERE payment_uuid = ?",
+        (payment_uuid,))
+    if not topup:
+        return {"status": "not_found", "paid": False}
+
+    if topup["status"] == "succeeded":
+        return {"status": "succeeded", "paid": True, "amount": topup["amount_rub"]}
+
+    if not topup["yookassa_payment_id"]:
+        return {"status": "pending", "paid": False}
+
+    _configure_yookassa()
+    loop = asyncio.get_event_loop()
+    try:
+        yp = await loop.run_in_executor(
+            None, lambda: Payment.find_one(topup["yookassa_payment_id"]))
+    except Exception as e:
+        logger.error(f"YooKassa topup check failed: {e}")
+        return {"status": "error", "paid": False}
+
+    if yp.status == "succeeded":
+        result = await process_topup_webhook(topup["yookassa_payment_id"])
+        return {"status": "succeeded", "paid": True,
+                "amount": topup["amount_rub"], **result}
+    elif yp.status == "canceled":
+        await execute(
+            "UPDATE balance_topups SET status = 'cancelled' WHERE id = ?",
+            (topup["id"],))
+        return {"status": "cancelled", "paid": False}
+    else:
+        return {"status": yp.status, "paid": False}
+
+
 async def expire_subscriptions():
     """Mark expired subscriptions. Called by scheduler."""
     expired_users = await fetch_all(

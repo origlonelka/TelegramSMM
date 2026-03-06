@@ -19,7 +19,8 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
          InlineKeyboardButton(text="🎟 Промокоды", callback_data="adm_promos")],
         [InlineKeyboardButton(text="🎫 Тикеты", callback_data="adm_tickets"),
          InlineKeyboardButton(text="📋 Аудит", callback_data="adm_audit")],
-        [InlineKeyboardButton(text="💵 YooKassa", callback_data="adm_yookassa")],
+        [InlineKeyboardButton(text="💵 YooKassa", callback_data="adm_yookassa"),
+         InlineKeyboardButton(text="🚀 Накрутка", callback_data="admin_boost")],
         [InlineKeyboardButton(text="◀️ Главное меню", callback_data="back_main")],
     ])
 

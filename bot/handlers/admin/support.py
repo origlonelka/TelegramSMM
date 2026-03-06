@@ -65,52 +65,6 @@ async def tickets_closed(callback: CallbackQuery, admin: dict):
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("adm_ticket_"))
-async def ticket_view(callback: CallbackQuery, admin: dict):
-    ticket_id = int(callback.data.replace("adm_ticket_", ""))
-    ticket = await fetch_one(
-        "SELECT t.*, u.username FROM support_tickets t "
-        "LEFT JOIN users u ON t.user_telegram_id = u.telegram_id "
-        "WHERE t.id = ?", (ticket_id,))
-    if not ticket:
-        await callback.answer("Тикет не найден", show_alert=True)
-        return
-
-    messages = await fetch_all(
-        "SELECT * FROM ticket_messages WHERE ticket_id = ? ORDER BY created_at",
-        (ticket_id,))
-
-    name = f"@{ticket['username']}" if ticket["username"] else str(ticket["user_telegram_id"])
-    lines = [
-        f"🎫 <b>Тикет #{ticket['id']}</b>\n",
-        f"От: {name}",
-        f"Тема: {ticket['subject'] or 'Без темы'}",
-        f"Статус: {ticket['status']}",
-        f"Создан: {ticket['created_at']}\n",
-        "💬 <b>Сообщения:</b>",
-    ]
-    for m in messages:
-        sender = "🛡 Админ" if m["is_admin"] else "👤 Пользователь"
-        lines.append(f"\n{sender} ({m['created_at'][:16]}):\n{m['text']}")
-
-    buttons = []
-    if ticket["status"] == "open":
-        buttons.append([InlineKeyboardButton(
-            text="💬 Ответить", callback_data=f"adm_ticket_reply_{ticket_id}")])
-        buttons.append([InlineKeyboardButton(
-            text="✅ Закрыть", callback_data=f"adm_ticket_close_{ticket_id}")])
-    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="adm_tickets")])
-
-    text = "\n".join(lines)
-    if len(text) > 4000:
-        text = text[:4000] + "\n..."
-    await callback.message.edit_text(
-        text,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
-        parse_mode="HTML")
-    await callback.answer()
-
-
 @router.callback_query(F.data.startswith("adm_ticket_reply_"))
 async def ticket_reply_start(callback: CallbackQuery, state: FSMContext, admin: dict):
     ticket_id = int(callback.data.replace("adm_ticket_reply_", ""))
@@ -168,3 +122,49 @@ async def ticket_close(callback: CallbackQuery, admin: dict):
     await log_action(admin["user_id"], "ticket_closed", "ticket", ticket_id)
     await callback.answer("Тикет закрыт")
     await tickets_menu(callback, admin)
+
+
+@router.callback_query(F.data.startswith("adm_ticket_"))
+async def ticket_view(callback: CallbackQuery, admin: dict):
+    ticket_id = int(callback.data.replace("adm_ticket_", ""))
+    ticket = await fetch_one(
+        "SELECT t.*, u.username FROM support_tickets t "
+        "LEFT JOIN users u ON t.user_telegram_id = u.telegram_id "
+        "WHERE t.id = ?", (ticket_id,))
+    if not ticket:
+        await callback.answer("Тикет не найден", show_alert=True)
+        return
+
+    messages = await fetch_all(
+        "SELECT * FROM ticket_messages WHERE ticket_id = ? ORDER BY created_at",
+        (ticket_id,))
+
+    name = f"@{ticket['username']}" if ticket["username"] else str(ticket["user_telegram_id"])
+    lines = [
+        f"🎫 <b>Тикет #{ticket['id']}</b>\n",
+        f"От: {name}",
+        f"Тема: {ticket['subject'] or 'Без темы'}",
+        f"Статус: {ticket['status']}",
+        f"Создан: {ticket['created_at']}\n",
+        "💬 <b>Сообщения:</b>",
+    ]
+    for m in messages:
+        sender = "🛡 Админ" if m["is_admin"] else "👤 Пользователь"
+        lines.append(f"\n{sender} ({m['created_at'][:16]}):\n{m['text']}")
+
+    buttons = []
+    if ticket["status"] == "open":
+        buttons.append([InlineKeyboardButton(
+            text="💬 Ответить", callback_data=f"adm_ticket_reply_{ticket_id}")])
+        buttons.append([InlineKeyboardButton(
+            text="✅ Закрыть", callback_data=f"adm_ticket_close_{ticket_id}")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="adm_tickets")])
+
+    text = "\n".join(lines)
+    if len(text) > 4000:
+        text = text[:4000] + "\n..."
+    await callback.message.edit_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+        parse_mode="HTML")
+    await callback.answer()

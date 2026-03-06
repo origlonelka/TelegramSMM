@@ -72,12 +72,67 @@ async def _reset_daily_limits():
 
 
 async def _check_subscription_expiry():
-    """Деактивирует истёкшие подписки."""
+    """Деактивирует истёкшие подписки и триалы."""
     try:
         from services.payment_manager import expire_subscriptions
         await expire_subscriptions()
     except Exception as e:
         logger.error(f"Subscription expiry check failed: {e}")
+
+    # Expire trials
+    try:
+        await execute(
+            "UPDATE users SET status = 'expired', updated_at = datetime('now') "
+            "WHERE status = 'trial_active' "
+            "AND trial_expires_at IS NOT NULL "
+            "AND datetime(trial_expires_at) < datetime('now')")
+    except Exception as e:
+        logger.error(f"Trial expiry check failed: {e}")
+
+
+async def _sync_boost_services():
+    """Синхронизирует сервисы LikeDrom каждые 2 часа."""
+    try:
+        from services.boost_manager import sync_services
+        count = await sync_services()
+        logger.info(f"Синхронизация накрутки: {count} сервисов")
+    except Exception as e:
+        logger.error(f"Boost services sync failed: {e}")
+
+
+async def _update_boost_orders():
+    """Обновляет статусы заказов накрутки каждые 5 минут."""
+    try:
+        from services.boost_manager import update_order_statuses
+        await update_order_statuses()
+    except Exception as e:
+        logger.error(f"Boost order status update failed: {e}")
+
+
+async def _check_likedrom_balance():
+    """Проверяет баланс LikeDrom, алерт если < 100₽."""
+    try:
+        from services import likedrom
+        balance = await likedrom.get_balance()
+        if balance < 100:
+            logger.warning(f"LikeDrom баланс низкий: {balance:.2f} ₽")
+            from core.webhook_server import _bot_instance
+            if _bot_instance:
+                from core.config import SUPERADMIN_IDS
+                for admin_id in SUPERADMIN_IDS:
+                    try:
+                        await _bot_instance.send_message(
+                            chat_id=admin_id,
+                            text=(
+                                f"⚠️ <b>Низкий баланс LikeDrom!</b>\n\n"
+                                f"Текущий баланс: <b>{balance:.2f} ₽</b>\n"
+                                f"Пополните баланс для продолжения работы накрутки."
+                            ),
+                            parse_mode="HTML")
+                    except Exception:
+                        pass
+    except Exception as e:
+        logger.error(f"LikeDrom balance check failed: {e}")
 
 
 async def _send_expiry_notifications():
@@ -126,6 +181,16 @@ def start_scheduler():
     # Уведомления об истечении подписки — ежедневно в 10:00
     scheduler.add_job(_send_expiry_notifications, "cron", hour=10, minute=0,
                       id="expiry_notifications")
+
+    # Накрутка: синхронизация сервисов каждые 2 часа
+    scheduler.add_job(_sync_boost_services, "interval", hours=2,
+                      id="boost_sync_services")
+    # Накрутка: обновление статусов заказов каждые 5 минут
+    scheduler.add_job(_update_boost_orders, "interval", minutes=5,
+                      id="boost_update_orders")
+    # Накрутка: проверка баланса LikeDrom каждые 30 минут
+    scheduler.add_job(_check_likedrom_balance, "interval", minutes=30,
+                      id="boost_check_balance")
 
     scheduler.start()
     logger.info("Планировщик запущен")
