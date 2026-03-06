@@ -13,11 +13,15 @@ NETWORK_LABELS = {
     "instagram": "📷 Instagram",
     "youtube": "📺 YouTube",
     "tiktok": "🎵 TikTok",
+    "vkontakte": "🔵 ВКонтакте",
     "vk": "🔵 ВКонтакте",
     "twitter": "🐦 Twitter",
     "facebook": "👤 Facebook",
     "ok": "🟠 Одноклассники",
+    "odnoklassniki": "🟠 Одноклассники",
     "likee": "❤️ Likee",
+    "max": "📱 Max",
+    "other": "🔧 Другое",
 }
 
 
@@ -41,6 +45,7 @@ async def sync_services():
 
         name = svc.get("name_ru") or svc.get("name", "")
         category = svc.get("category_name") or svc.get("category", "")
+        category_id = int(svc.get("category_id", 0))
         # API возвращает social_network_en или network
         network = (
             svc.get("social_network_en")
@@ -65,18 +70,18 @@ async def sync_services():
             "SELECT id FROM boost_services WHERE id = ?", (sid,))
         if existing:
             await execute(
-                "UPDATE boost_services SET name=?, category=?, network=?, "
+                "UPDATE boost_services SET name=?, category=?, category_id=?, network=?, "
                 "min_qty=?, max_qty=?, cost_per_1k=?, price_per_1k=?, "
                 "updated_at=datetime('now') WHERE id=?",
-                (name, category, network, min_qty, max_qty,
+                (name, category, category_id, network, min_qty, max_qty,
                  cost_per_1k, price_per_1k, sid))
         else:
             await execute(
                 "INSERT INTO boost_services "
-                "(id, name, category, network, min_qty, max_qty, "
+                "(id, name, category, category_id, network, min_qty, max_qty, "
                 "cost_per_1k, price_per_1k) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (sid, name, category, network, min_qty, max_qty,
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (sid, name, category, category_id, network, min_qty, max_qty,
                  cost_per_1k, price_per_1k))
         count += 1
 
@@ -101,15 +106,26 @@ async def get_networks() -> list[dict]:
 async def get_categories(network: str) -> list[dict]:
     """Категории сервисов для конкретной сети."""
     rows = await fetch_all(
-        "SELECT category, COUNT(*) as cnt FROM boost_services "
+        "SELECT category, category_id, COUNT(*) as cnt FROM boost_services "
         "WHERE is_active = 1 AND network = ? AND category != '' "
-        "GROUP BY category ORDER BY cnt DESC",
+        "GROUP BY category_id ORDER BY cnt DESC",
         (network,))
-    return [{"name": r["category"], "count": r["cnt"]} for r in rows]
+    return [{"name": r["category"], "id": r["category_id"], "count": r["cnt"]}
+            for r in rows]
+
+
+async def get_services_by_category_id(network: str, category_id: int) -> list[dict]:
+    """Список услуг для сети и категории (по category_id)."""
+    rows = await fetch_all(
+        "SELECT * FROM boost_services "
+        "WHERE is_active = 1 AND network = ? AND category_id = ? "
+        "ORDER BY price_per_1k ASC",
+        (network, category_id))
+    return [dict(r) for r in rows]
 
 
 async def get_services(network: str, category: str) -> list[dict]:
-    """Список услуг для сети и категории."""
+    """Список услуг для сети и категории (по имени, legacy)."""
     rows = await fetch_all(
         "SELECT * FROM boost_services "
         "WHERE is_active = 1 AND network = ? AND category = ? "

@@ -6,7 +6,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 from db.database import fetch_one
 from services.boost_manager import (
-    get_networks, get_categories, get_services, get_service,
+    get_networks, get_categories, get_services_by_category_id, get_service,
     get_user_balance, create_boost_order, get_user_orders,
 )
 from services.user_manager import get_or_create_user
@@ -159,7 +159,7 @@ async def boost_network(callback: CallbackQuery):
     for cat in categories:
         buttons.append([InlineKeyboardButton(
             text=f"{cat['name']} ({cat['count']})",
-            callback_data=f"bst_cat_{network}_{cat['name'][:40]}")])
+            callback_data=f"bst_cat_{network}_{cat['id']}")])
     buttons.append([InlineKeyboardButton(
         text="◀️ Назад", callback_data="back_boost")])
 
@@ -174,17 +174,23 @@ async def boost_network(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("bst_cat_"))
 async def boost_category(callback: CallbackQuery):
-    parts = callback.data.replace("bst_cat_", "").split("_", 1)
-    network = parts[0]
-    category = parts[1] if len(parts) > 1 else ""
+    # Format: bst_cat_{network}_{category_id}
+    raw = callback.data.replace("bst_cat_", "")
+    # category_id is always the last part after last _
+    last_sep = raw.rfind("_")
+    network = raw[:last_sep]
+    category_id = int(raw[last_sep + 1:])
 
-    services = await get_services(network, category)
+    services = await get_services_by_category_id(network, category_id)
     if not services:
         await callback.answer("Нет доступных услуг", show_alert=True)
         return
 
+    # Название категории из первого сервиса
+    cat_name = services[0].get("category", "")
+
     buttons = []
-    for svc in services[:20]:  # Лимит 20 кнопок
+    for svc in services[:20]:
         price_text = f"{svc['price_per_1k']:.2f}₽/1K"
         name_short = svc["name"][:35]
         buttons.append([InlineKeyboardButton(
@@ -194,7 +200,7 @@ async def boost_category(callback: CallbackQuery):
         text="◀️ Назад", callback_data=f"bst_net_{network}")])
 
     await callback.message.edit_text(
-        f"📋 <b>{category}</b>\n\nВыберите услугу:",
+        f"📋 <b>{cat_name}</b>\n\nВыберите услугу:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
         parse_mode="HTML")
     await callback.answer()

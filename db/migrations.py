@@ -218,6 +218,10 @@ MIGRATIONS = [
         )""",
         "CREATE INDEX IF NOT EXISTS idx_boost_svc_net ON boost_services(network, is_active)",
     ],
+    # Migration 10: add category_id to boost_services
+    [
+        "ALTER TABLE boost_services ADD COLUMN category_id INTEGER DEFAULT 0",
+    ],
 ]
 
 
