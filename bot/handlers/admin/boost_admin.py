@@ -14,6 +14,8 @@ router = Router()
 class BoostSettings(StatesGroup):
     markup = State()
     api_key = State()
+    balance_user_id = State()
+    balance_amount = State()
 
 
 # ─── Главная страница накрутки в админке ─────────────────
@@ -66,6 +68,8 @@ async def admin_boost_menu(callback: CallbackQuery):
             text="🔑 API ключ", callback_data="admin_boost_apikey")],
         [InlineKeyboardButton(
             text="🔄 Синхронизировать сервисы", callback_data="admin_boost_sync")],
+        [InlineKeyboardButton(
+            text="💰 Изменить баланс", callback_data="admin_boost_balance")],
         [InlineKeyboardButton(
             text="📋 Последние заказы", callback_data="admin_boost_orders")],
         [InlineKeyboardButton(
@@ -222,3 +226,91 @@ async def admin_boost_orders(callback: CallbackQuery):
             [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_boost")]]),
         parse_mode="HTML")
     await callback.answer()
+
+
+# ─── Изменить баланс пользователя ────────────────────────
+
+@router.callback_query(F.data == "admin_boost_balance")
+async def admin_boost_balance(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(BoostSettings.balance_user_id)
+    await callback.message.edit_text(
+        "💰 <b>Изменение баланса</b>\n\n"
+        "Введите Telegram ID пользователя:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Отмена", callback_data="admin_boost")]]),
+        parse_mode="HTML")
+    await callback.answer()
+
+
+@router.message(BoostSettings.balance_user_id)
+async def admin_boost_balance_user(message: Message, state: FSMContext):
+    text = message.text.strip()
+    if not text.isdigit():
+        await message.answer("❌ Введите числовой Telegram ID:")
+        return
+
+    user_tg_id = int(text)
+    user_row = await fetch_one(
+        "SELECT telegram_id, username, first_name, balance_rub "
+        "FROM users WHERE telegram_id = ?", (user_tg_id,))
+
+    if not user_row:
+        await message.answer(
+            "❌ Пользователь не найден. Введите другой ID:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="❌ Отмена", callback_data="admin_boost")]]))
+        return
+
+    await state.update_data(user_tg_id=user_tg_id)
+    await state.set_state(BoostSettings.balance_amount)
+
+    name = user_row["username"] or user_row["first_name"] or str(user_tg_id)
+    balance = float(user_row["balance_rub"]) if user_row["balance_rub"] else 0.0
+
+    await message.answer(
+        f"👤 Пользователь: <b>@{name}</b> (ID: {user_tg_id})\n"
+        f"💰 Текущий баланс: <b>{balance:.2f} ₽</b>\n\n"
+        f"Введите сумму изменения:\n"
+        f"<i>Положительное число — пополнение, отрицательное — списание</i>\n"
+        f"Например: <code>500</code> или <code>-200</code>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Отмена", callback_data="admin_boost")]]))
+
+
+@router.message(BoostSettings.balance_amount)
+async def admin_boost_balance_set(message: Message, state: FSMContext):
+    text = message.text.strip().replace(",", ".")
+    try:
+        amount = float(text)
+    except ValueError:
+        await message.answer("❌ Введите число (например: 500 или -200):")
+        return
+
+    if amount == 0:
+        await message.answer("❌ Сумма не может быть 0:")
+        return
+
+    data = await state.get_data()
+    user_tg_id = data["user_tg_id"]
+    await state.clear()
+
+    await execute(
+        "UPDATE users SET balance_rub = MAX(0, balance_rub + ?) "
+        "WHERE telegram_id = ?",
+        (amount, user_tg_id))
+
+    new_balance_row = await fetch_one(
+        "SELECT balance_rub FROM users WHERE telegram_id = ?", (user_tg_id,))
+    new_balance = float(new_balance_row["balance_rub"]) if new_balance_row else 0.0
+
+    action = "пополнен" if amount > 0 else "списан"
+    await message.answer(
+        f"✅ Баланс {action} на <b>{abs(amount):.2f} ₽</b>\n"
+        f"💰 Новый баланс: <b>{new_balance:.2f} ₽</b>\n"
+        f"👤 Пользователь: {user_tg_id}",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(
+                text="💰 Ещё изменить", callback_data="admin_boost_balance")],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_boost")]]))
