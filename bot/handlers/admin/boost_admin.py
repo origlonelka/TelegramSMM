@@ -235,7 +235,7 @@ async def admin_boost_balance(callback: CallbackQuery, state: FSMContext):
     await state.set_state(BoostSettings.balance_user_id)
     await callback.message.edit_text(
         "💰 <b>Изменение баланса</b>\n\n"
-        "Введите Telegram ID пользователя:",
+        "Введите Telegram ID или @username пользователя:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="❌ Отмена", callback_data="admin_boost")]]),
         parse_mode="HTML")
@@ -244,23 +244,25 @@ async def admin_boost_balance(callback: CallbackQuery, state: FSMContext):
 
 @router.message(BoostSettings.balance_user_id)
 async def admin_boost_balance_user(message: Message, state: FSMContext):
-    text = message.text.strip()
-    if not text.isdigit():
-        await message.answer("❌ Введите числовой Telegram ID:")
-        return
+    text = message.text.strip().lstrip("@")
 
-    user_tg_id = int(text)
-    user_row = await fetch_one(
-        "SELECT telegram_id, username, first_name, balance_rub "
-        "FROM users WHERE telegram_id = ?", (user_tg_id,))
+    if text.isdigit():
+        user_row = await fetch_one(
+            "SELECT telegram_id, username, first_name, balance_rub "
+            "FROM users WHERE telegram_id = ?", (int(text),))
+    else:
+        user_row = await fetch_one(
+            "SELECT telegram_id, username, first_name, balance_rub "
+            "FROM users WHERE username = ?", (text,))
 
     if not user_row:
         await message.answer(
-            "❌ Пользователь не найден. Введите другой ID:",
+            "❌ Пользователь не найден. Введите ID или @username:",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="❌ Отмена", callback_data="admin_boost")]]))
         return
 
+    user_tg_id = user_row["telegram_id"]
     await state.update_data(user_tg_id=user_tg_id)
     await state.set_state(BoostSettings.balance_amount)
 

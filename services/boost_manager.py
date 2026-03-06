@@ -108,6 +108,16 @@ async def get_services(network: str, category: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+async def get_all_services_for_network(network: str) -> list[dict]:
+    """Все услуги сети (без фильтра по категории)."""
+    rows = await fetch_all(
+        "SELECT * FROM boost_services "
+        "WHERE is_active = 1 AND network = ? "
+        "ORDER BY price_per_1k ASC",
+        (network,))
+    return [dict(r) for r in rows]
+
+
 async def get_service(service_id: int) -> dict | None:
     row = await fetch_one(
         "SELECT * FROM boost_services WHERE id = ?", (service_id,))

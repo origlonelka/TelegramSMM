@@ -124,12 +124,36 @@ async def boost_network(callback: CallbackQuery):
     network = callback.data.replace("bst_net_", "")
     categories = await get_categories(network)
 
-    if not categories:
-        await callback.answer("Нет доступных услуг", show_alert=True)
-        return
-
     from services.boost_manager import NETWORK_LABELS
     net_label = NETWORK_LABELS.get(network, network)
+
+    # Если категорий нет — сразу показываем услуги
+    if not categories:
+        services = await get_services(network, "")
+        if not services:
+            # Попробуем все услуги сети (без фильтра по категории)
+            from services.boost_manager import get_all_services_for_network
+            services = await get_all_services_for_network(network)
+        if not services:
+            await callback.answer("Нет доступных услуг", show_alert=True)
+            return
+
+        buttons = []
+        for svc in services[:20]:
+            price_text = f"{svc['price_per_1k']:.2f}₽/1K"
+            name_short = svc["name"][:35]
+            buttons.append([InlineKeyboardButton(
+                text=f"{name_short} — {price_text}",
+                callback_data=f"bst_svc_{svc['id']}")])
+        buttons.append([InlineKeyboardButton(
+            text="◀️ Назад", callback_data="back_boost")])
+
+        await callback.message.edit_text(
+            f"{net_label}\n\nВыберите услугу:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+            parse_mode="HTML")
+        await callback.answer()
+        return
 
     buttons = []
     for cat in categories:
