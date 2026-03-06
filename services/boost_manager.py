@@ -39,14 +39,24 @@ async def sync_services():
         if not sid:
             continue
 
-        name = svc.get("name", "")
-        category = svc.get("category", "")
-        network = (svc.get("network", "") or "").lower().strip()
+        name = svc.get("name_ru") or svc.get("name", "")
+        category = svc.get("category_name") or svc.get("category", "")
+        # API возвращает social_network_en или network
+        network = (
+            svc.get("social_network_en")
+            or svc.get("network", "")
+            or ""
+        ).lower().strip()
         min_qty = int(svc.get("min", 0))
         max_qty = int(svc.get("max", 0))
 
-        # Цена за 1000 единиц
-        rate = float(svc.get("rate", 0))
+        # Цена за 1000 единиц: reseller_cost (оптовая) или cost
+        rate = float(
+            svc.get("reseller_cost")
+            or svc.get("cost")
+            or svc.get("rate")
+            or 0
+        )
         cost_per_1k = rate  # цена LikeDrom
         price_per_1k = round(rate * multiplier, 2)  # наша цена
 
