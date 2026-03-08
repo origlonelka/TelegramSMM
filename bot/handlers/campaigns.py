@@ -563,10 +563,12 @@ async def camp_logs(callback: CallbackQuery):
 
     offset = page * LOGS_PER_PAGE
     logs = await fetch_all(
-        "SELECT l.*, a.phone, c.username "
+        "SELECT l.*, a.phone, "
+        "CASE WHEN l.mode = 'promo_chats' THEN pc.username ELSE c.username END AS channel_username "
         "FROM logs l "
         "LEFT JOIN accounts a ON l.account_id = a.id "
-        "LEFT JOIN channels c ON l.channel_id = c.id "
+        "LEFT JOIN channels c ON l.channel_id = c.id AND l.mode != 'promo_chats' "
+        "LEFT JOIN promo_chats pc ON l.channel_id = pc.id AND l.mode = 'promo_chats' "
         "WHERE l.campaign_id = ? "
         "ORDER BY l.sent_at DESC LIMIT ? OFFSET ?",
         (camp_id, LOGS_PER_PAGE, offset),
@@ -578,6 +580,7 @@ async def camp_logs(callback: CallbackQuery):
         "stories": "👁",
         "stories_like": "❤️",
         "dm": "✉️",
+        "promo_chats": "📢",
     }
 
     lines = [
@@ -592,7 +595,7 @@ async def camp_logs(callback: CallbackQuery):
             icon = mode_icons.get(log["mode"], "❓")
             status_icon = "✅" if log["status"] == "sent" else "❌"
             phone = log["phone"] or "—"
-            channel = f"@{log['username']}" if log["username"] else "—"
+            channel = f"@{log['channel_username']}" if log["channel_username"] else "—"
             time_str = log["sent_at"][11:16] if log["sent_at"] and len(log["sent_at"]) > 16 else log["sent_at"] or "—"
             date_str = log["sent_at"][:10] if log["sent_at"] and len(log["sent_at"]) >= 10 else ""
 
