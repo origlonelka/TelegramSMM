@@ -96,23 +96,33 @@ async def run_promo_chat_campaign(campaign_id: int):
     logger.info(
         f"Промо-кампания #{campaign_id}: {len(tasks)} аккаунтов, "
         f"{len(eligible_chats)} чатов")
-    await asyncio.gather(*tasks, return_exceptions=True)
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    for i, r in enumerate(results):
+        if isinstance(r, Exception):
+            logger.error(f"Промо-воркер #{i} упал: {type(r).__name__}: {r}")
 
 
 async def _promo_worker(account, chats, messages, camp):
     """Worker for one account — posts to assigned promo chats."""
+    logger.info(f"[promo] воркер #{account['id']} стартует, чатов: {len(chats)}")
     for chat in chats:
         acc_fresh = await fetch_one(
             "SELECT * FROM accounts WHERE id = ?", (account["id"],))
         if not acc_fresh or acc_fresh["status"] != "active":
+            logger.info(f"[promo] аккаунт #{account['id']} неактивен, стоп")
             break
         if acc_fresh["comments_today"] >= camp["daily_limit"]:
+            logger.info(f"[promo] аккаунт #{account['id']} дневной лимит")
             break
         if acc_fresh["comments_hour"] >= camp["hourly_limit"]:
+            logger.info(f"[promo] аккаунт #{account['id']} часовой лимит")
             break
 
         message = random.choice(messages)
-        await _send_promo_message(account, chat, message, camp)
+        try:
+            await _send_promo_message(account, chat, message, camp)
+        except Exception as e:
+            logger.error(f"[promo] _send_promo_message упал: {type(e).__name__}: {e}")
 
         delay = random.randint(
             max(chat["min_delay"], 60),
