@@ -22,11 +22,12 @@ logger = logging.getLogger(__name__)
 
 async def run_promo_chat_campaign(campaign_id: int):
     """Run one cycle of promo chat posting for a campaign."""
-    camp = await fetch_one(
+    camp_row = await fetch_one(
         "SELECT * FROM campaigns WHERE id = ? AND is_active = 1",
         (campaign_id,))
-    if not camp:
+    if not camp_row:
         return
+    camp = dict(camp_row)
 
     accounts = await fetch_all("""
         SELECT a.* FROM accounts a
