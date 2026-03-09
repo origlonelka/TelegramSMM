@@ -13,7 +13,7 @@ from pyrogram.errors import (
     AuthKeyUnregistered, UserDeactivated, UserDeactivatedBan, SessionRevoked,
     ChatWriteForbidden, SlowmodeWait,
 )
-from db.database import execute, fetch_one, fetch_all, execute_returning, delete_account
+from db.database import execute, fetch_one, fetch_all, execute_returning, execute_no_fk, delete_account
 from services.account_manager import ensure_connected, disconnect
 from services.spintax import spin
 
@@ -143,7 +143,7 @@ async def _send_promo_message(account, chat, message, camp):
 
     # Dry run
     if camp.get("is_dry_run"):
-        await execute_returning(
+        await execute_no_fk(
             "INSERT INTO logs (campaign_id, account_id, channel_id, message_id, "
             "mode, status) VALUES (?, ?, ?, ?, 'promo_chats', 'dry_run')",
             (camp["id"], account["id"], chat["id"], message["id"]))
@@ -177,7 +177,7 @@ async def _send_promo_message(account, chat, message, camp):
             "UPDATE promo_chats SET last_post_at = datetime('now'), "
             "error_count = 0 WHERE id = ?", (chat["id"],))
 
-        await execute_returning(
+        await execute_no_fk(
             "INSERT INTO logs (campaign_id, account_id, channel_id, message_id, "
             "mode, status) VALUES (?, ?, ?, ?, 'promo_chats', 'sent')",
             (camp["id"], account["id"], chat["id"], message["id"]))
@@ -192,7 +192,7 @@ async def _send_promo_message(account, chat, message, camp):
         logger.error(f"Аккаунт #{account['id']} мёртв ({type(e).__name__})")
         await disconnect(account["id"])
         await delete_account(account["id"])
-        await execute_returning(
+        await execute_no_fk(
             "INSERT INTO logs (campaign_id, account_id, channel_id, message_id, "
             "mode, status, error) VALUES (?, ?, ?, ?, 'promo_chats', 'error', ?)",
             (camp["id"], account["id"], chat["id"], message["id"],
@@ -229,7 +229,7 @@ async def _send_promo_message(account, chat, message, camp):
             await execute(
                 "UPDATE promo_chats SET error_count = error_count + 1 "
                 "WHERE id = ?", (chat["id"],))
-        await execute_returning(
+        await execute_no_fk(
             "INSERT INTO logs (campaign_id, account_id, channel_id, message_id, "
             "mode, status, error) VALUES (?, ?, ?, ?, 'promo_chats', 'error', ?)",
             (camp["id"], account["id"], chat["id"], message["id"], str(e)))
@@ -239,7 +239,7 @@ async def _send_promo_message(account, chat, message, camp):
         await execute(
             "UPDATE promo_chats SET error_count = error_count + 1 WHERE id = ?",
             (chat["id"],))
-        await execute_returning(
+        await execute_no_fk(
             "INSERT INTO logs (campaign_id, account_id, channel_id, message_id, "
             "mode, status, error) VALUES (?, ?, ?, ?, 'promo_chats', 'error', ?)",
             (camp["id"], account["id"], chat["id"], message["id"], str(e)))

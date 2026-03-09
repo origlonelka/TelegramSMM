@@ -76,3 +76,15 @@ async def execute_returning(query: str, params: tuple = ()):
     cursor = await db.execute(query, params)
     await db.commit()
     return cursor.lastrowid
+
+
+async def execute_no_fk(query: str, params: tuple = ()):
+    """Execute with foreign keys temporarily disabled (for cross-table refs like promo_chats logs)."""
+    db = await get_db()
+    await db.execute("PRAGMA foreign_keys=OFF")
+    try:
+        cursor = await db.execute(query, params)
+        await db.commit()
+        return cursor.lastrowid
+    finally:
+        await db.execute("PRAGMA foreign_keys=ON")
