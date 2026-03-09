@@ -4,8 +4,11 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBut
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from db.database import fetch_one, fetch_all
+from core.scheduler import get_campaign_interval, set_campaign_interval
 
 router = Router()
+
+INTERVAL_OPTIONS = [1, 2, 3, 5, 10, 15, 30, 60]
 
 
 def admin_menu_kb() -> InlineKeyboardMarkup:
@@ -21,6 +24,7 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
          InlineKeyboardButton(text="📋 Аудит", callback_data="adm_audit")],
         [InlineKeyboardButton(text="💵 YooKassa", callback_data="adm_yookassa"),
          InlineKeyboardButton(text="🚀 Накрутка", callback_data="admin_boost")],
+        [InlineKeyboardButton(text="⏱ Интервал кампаний", callback_data="adm_interval")],
         [InlineKeyboardButton(text="◀️ Главное меню", callback_data="back_main")],
     ])
 
@@ -167,3 +171,55 @@ async def yookassa_settings(callback: CallbackQuery, admin: dict):
             [InlineKeyboardButton(text="◀️ Назад", callback_data="adm_back")],
         ]), parse_mode="HTML")
     await callback.answer()
+
+
+# --- Интервал кампаний ---
+
+@router.callback_query(F.data == "adm_interval")
+async def adm_interval(callback: CallbackQuery):
+    current = await get_campaign_interval()
+    buttons = []
+    row = []
+    for m in INTERVAL_OPTIONS:
+        label = f"{'✅ ' if m == current else ''}{m} мин"
+        row.append(InlineKeyboardButton(text=label, callback_data=f"adm_set_iv_{m}"))
+        if len(row) == 4:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="adm_back")])
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+    await callback.message.edit_text(
+        f"⏱ <b>Интервал запуска кампаний</b>\n\n"
+        f"Текущий: <b>{current} мин</b>\n"
+        f"Как часто бот проверяет и запускает активные кампании.\n\n"
+        f"Выберите новый интервал:",
+        reply_markup=kb, parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("adm_set_iv_"))
+async def adm_set_interval(callback: CallbackQuery):
+    minutes = int(callback.data.split("_")[-1])
+    await set_campaign_interval(minutes)
+    await callback.answer(f"✅ Интервал изменён на {minutes} мин", show_alert=True)
+    current = await get_campaign_interval()
+    buttons = []
+    row = []
+    for m in INTERVAL_OPTIONS:
+        label = f"{'✅ ' if m == current else ''}{m} мин"
+        row.append(InlineKeyboardButton(text=label, callback_data=f"adm_set_iv_{m}"))
+        if len(row) == 4:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="adm_back")])
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+    await callback.message.edit_text(
+        f"⏱ <b>Интервал запуска кампаний</b>\n\n"
+        f"Текущий: <b>{current} мин</b>\n"
+        f"Как часто бот проверяет и запускает активные кампании.\n\n"
+        f"Выберите новый интервал:",
+        reply_markup=kb, parse_mode="HTML")

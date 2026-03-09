@@ -3,67 +3,30 @@ from aiogram.types import CallbackQuery
 from aiogram.exceptions import TelegramBadRequest
 from db.database import execute, fetch_one, fetch_all
 from bot.keyboards.inline import settings_menu_kb, stats_kb, stats_sub_kb, MODE_LABELS
-from core.scheduler import get_campaign_interval, set_campaign_interval
 
 router = Router()
 
 
 # --- Настройки ---
 
-async def _show_settings(callback: CallbackQuery):
-    interval = await get_campaign_interval()
+@router.callback_query(F.data == "settings")
+async def settings_menu(callback: CallbackQuery):
     text = (
         "⚙️ <b>Настройки</b>\n\n"
         "Выберите действие:"
     )
-    await callback.message.edit_text(text, reply_markup=settings_menu_kb(interval), parse_mode="HTML")
-
-
-@router.callback_query(F.data == "settings")
-async def settings_menu(callback: CallbackQuery):
-    await _show_settings(callback)
+    await callback.message.edit_text(text, reply_markup=settings_menu_kb(), parse_mode="HTML")
     await callback.answer()
 
 
 @router.callback_query(F.data == "back_settings")
 async def back_settings(callback: CallbackQuery):
-    await _show_settings(callback)
+    text = (
+        "⚙️ <b>Настройки</b>\n\n"
+        "Выберите действие:"
+    )
+    await callback.message.edit_text(text, reply_markup=settings_menu_kb(), parse_mode="HTML")
     await callback.answer()
-
-
-INTERVAL_OPTIONS = [1, 2, 3, 5, 10, 15, 30, 60]
-
-
-@router.callback_query(F.data == "settings_interval")
-async def settings_interval(callback: CallbackQuery):
-    current = await get_campaign_interval()
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-    buttons = []
-    row = []
-    for m in INTERVAL_OPTIONS:
-        label = f"{'✅ ' if m == current else ''}{m} мин"
-        row.append(InlineKeyboardButton(text=label, callback_data=f"set_interval_{m}"))
-        if len(row) == 4:
-            buttons.append(row)
-            row = []
-    if row:
-        buttons.append(row)
-    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back_settings")])
-    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
-    await callback.message.edit_text(
-        f"⏱ <b>Интервал запуска кампаний</b>\n\n"
-        f"Текущий: <b>{current} мин</b>\n"
-        f"Выберите новый интервал:",
-        reply_markup=kb, parse_mode="HTML")
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("set_interval_"))
-async def set_interval(callback: CallbackQuery):
-    minutes = int(callback.data.split("_")[-1])
-    await set_campaign_interval(minutes)
-    await callback.answer(f"✅ Интервал изменён на {minutes} мин", show_alert=True)
-    await _show_settings(callback)
 
 
 @router.callback_query(F.data == "settings_reset_limits")

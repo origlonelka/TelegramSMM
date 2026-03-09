@@ -584,9 +584,8 @@ def prx_confirm_del_kb(prx_id: int) -> InlineKeyboardMarkup:
 
 # --- Настройки ---
 
-def settings_menu_kb(interval: int = 5) -> InlineKeyboardMarkup:
+def settings_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"⏱ Интервал кампаний: {interval} мин", callback_data="settings_interval")],
         [InlineKeyboardButton(text="🔄 Сбросить лимиты", callback_data="settings_reset_limits")],
         [InlineKeyboardButton(text="◀️ Главное меню", callback_data="back_main")],
     ])
