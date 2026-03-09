@@ -140,15 +140,6 @@ async def _send_promo_message(account, chat, message, camp):
     logger.info(
         f"[promo] аккаунт #{account['id']} -> {chat_target}")
 
-    # Dedup check
-    dedup = await fetch_one(
-        "SELECT 1 FROM logs WHERE channel_id = ? AND message_id = ? "
-        "AND mode = 'promo_chats' AND status = 'sent' "
-        "AND sent_at >= datetime('now', ? || ' hours')",
-        (chat["id"], message["id"], f"-{chat['dedup_window_hours']}"))
-    if dedup:
-        logger.info(f"[promo] дедуп: сообщение уже отправлено в чат #{chat['id']}")
-        return
 
     # Dry run
     if camp.get("is_dry_run"):
