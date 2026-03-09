@@ -285,6 +285,16 @@ def camp_confirm_del_kb(camp_id: int) -> InlineKeyboardMarkup:
 
 def camp_select_items_kb(items: list, prefix: str, camp_id: int, selected_ids: set) -> InlineKeyboardMarkup:
     buttons = []
+    all_ids = {dict(item)["id"] for item in items}
+    all_selected = all_ids == selected_ids & all_ids if all_ids else False
+    # Кнопка выбрать все / снять все
+    if len(items) > 1:
+        if all_selected:
+            buttons.append([InlineKeyboardButton(
+                text="❌ Снять все", callback_data=f"{prefix}_alloff_{camp_id}")])
+        else:
+            buttons.append([InlineKeyboardButton(
+                text="✅ Выбрать все", callback_data=f"{prefix}_allon_{camp_id}")])
     for item in items:
         d = dict(item)
         check = "✅" if d["id"] in selected_ids else "⬜"

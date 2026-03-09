@@ -434,6 +434,81 @@ async def camp_pchat_toggle(callback: CallbackQuery, db_user: dict):
     await callback.answer()
 
 
+# --- Выбрать все / Снять все ---
+
+# Маппинг prefix -> (junction_table, item_column, items_table, items_owner_col)
+_BULK_MAP = {
+    "camp_ch": ("campaign_channels", "channel_id", "channels", "owner_user_id"),
+    "camp_acc": ("campaign_accounts", "account_id", "accounts", "owner_user_id"),
+    "camp_msg": ("campaign_messages", "message_id", "messages", "owner_user_id"),
+    "camp_pchat": ("campaign_promo_chats", "promo_chat_id", "promo_chats", "owner_user_id"),
+}
+
+
+@router.callback_query(F.data.regexp(r"^camp_(ch|acc|msg|pchat)_allon_\d+$"))
+async def camp_select_all(callback: CallbackQuery, db_user: dict):
+    data = callback.data
+    # Парсим: camp_pchat_allon_16 -> prefix=camp_pchat, camp_id=16
+    parts = data.rsplit("_", 1)
+    camp_id = int(parts[-1])
+    prefix = data.rsplit("_allon_", 1)[0]
+
+    cfg = _BULK_MAP.get(prefix)
+    if not cfg:
+        await callback.answer("Ошибка", show_alert=True)
+        return
+
+    junction, col, table, owner_col = cfg
+    uid = db_user["telegram_id"]
+
+    # Получить все айтемы пользователя
+    items = await fetch_all(f"SELECT id FROM {table} WHERE {owner_col} = ?", (uid,))
+    # Вставить все
+    for item in items:
+        existing = await fetch_one(
+            f"SELECT 1 FROM {junction} WHERE campaign_id = ? AND {col} = ?",
+            (camp_id, item["id"]))
+        if not existing:
+            await execute(
+                f"INSERT INTO {junction} (campaign_id, {col}) VALUES (?, ?)",
+                (camp_id, item["id"]))
+
+    # Перерисовать клавиатуру
+    items = await fetch_all(f"SELECT * FROM {table} WHERE {owner_col} = ? ORDER BY id", (uid,))
+    linked = await fetch_all(f"SELECT {col} FROM {junction} WHERE campaign_id = ?", (camp_id,))
+    selected_ids = {r[col] for r in linked}
+    await callback.message.edit_reply_markup(
+        reply_markup=camp_select_items_kb(items, prefix, camp_id, selected_ids))
+    await callback.answer("✅ Все выбраны")
+
+
+@router.callback_query(F.data.regexp(r"^camp_(ch|acc|msg|pchat)_alloff_\d+$"))
+async def camp_deselect_all(callback: CallbackQuery, db_user: dict):
+    data = callback.data
+    parts = data.rsplit("_", 1)
+    camp_id = int(parts[-1])
+    prefix = data.rsplit("_alloff_", 1)[0]
+
+    cfg = _BULK_MAP.get(prefix)
+    if not cfg:
+        await callback.answer("Ошибка", show_alert=True)
+        return
+
+    junction, col, table, owner_col = cfg
+    uid = db_user["telegram_id"]
+
+    # Удалить все связи
+    await execute(f"DELETE FROM {junction} WHERE campaign_id = ?", (camp_id,))
+
+    # Перерисовать клавиатуру
+    items = await fetch_all(f"SELECT * FROM {table} WHERE {owner_col} = ? ORDER BY id", (uid,))
+    linked = await fetch_all(f"SELECT {col} FROM {junction} WHERE campaign_id = ?", (camp_id,))
+    selected_ids = {r[col] for r in linked}
+    await callback.message.edit_reply_markup(
+        reply_markup=camp_select_items_kb(items, prefix, camp_id, selected_ids))
+    await callback.answer("❌ Все сняты")
+
+
 # --- Лимиты ---
 
 @router.callback_query(F.data.startswith("camp_limits_"))
