@@ -7,7 +7,7 @@ from aiohttp import web
 
 from core.config import BOT_TOKEN, WEBHOOK_PORT
 from db.database import init_db, close_db
-from core.scheduler import start_scheduler
+from core.scheduler import start_scheduler, get_campaign_interval
 from bot.middlewares.access import UserAccessMiddleware
 from core.webhook_server import create_webhook_app, set_bot
 
@@ -61,8 +61,9 @@ async def main():
     dp.include_router(work_router)
 
     # Запуск планировщика
-    start_scheduler()
-    logger.info("Планировщик запущен")
+    interval = await get_campaign_interval()
+    start_scheduler(campaign_interval=interval)
+    logger.info(f"Планировщик запущен (интервал кампаний: {interval} мин)")
 
     # Запуск webhook-сервера для YooKassa
     set_bot(bot)

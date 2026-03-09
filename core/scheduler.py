@@ -168,9 +168,32 @@ async def _send_expiry_notifications():
         logger.error(f"Expiry notification failed: {e}")
 
 
-def start_scheduler():
-    # Запускать кампании каждые 5 минут
-    scheduler.add_job(_run_active_campaigns, "interval", minutes=5, id="campaigns")
+async def get_campaign_interval() -> int:
+    """Получает интервал запуска кампаний из bot_settings (по умолчанию 5 мин)."""
+    row = await fetch_one(
+        "SELECT value FROM bot_settings WHERE key = 'campaign_interval_minutes'")
+    if row:
+        try:
+            return max(1, int(row["value"]))
+        except (ValueError, TypeError):
+            pass
+    return 5
+
+
+async def set_campaign_interval(minutes: int):
+    """Устанавливает интервал и перепланирует джоб."""
+    minutes = max(1, minutes)
+    await execute(
+        "INSERT OR REPLACE INTO bot_settings (key, value) VALUES ('campaign_interval_minutes', ?)",
+        (str(minutes),))
+    # Перепланировать джоб
+    scheduler.reschedule_job("campaigns", trigger="interval", minutes=minutes)
+    logger.info(f"Интервал кампаний изменён на {minutes} мин")
+
+
+def start_scheduler(campaign_interval: int = 5):
+    # Запускать кампании с настроенным интервалом
+    scheduler.add_job(_run_active_campaigns, "interval", minutes=campaign_interval, id="campaigns")
     # Сбрасывать часовые лимиты каждый час
     scheduler.add_job(_reset_hourly_limits, "cron", minute=0, id="hourly_reset")
     # Сбрасывать дневные лимиты в полночь
