@@ -136,6 +136,50 @@ async def _promo_worker(account, chats, messages, camp):
             return
 
 
+async def _join_required_channels(client, chat_target):
+    """Detect anti-spam bots requiring channel subscriptions and join those channels."""
+    import re
+    try:
+        # Get recent messages — anti-spam bots usually post in last 10-20 messages
+        messages = []
+        async for msg in client.get_chat_history(chat_target, limit=15):
+            messages.append(msg)
+
+        for msg in messages:
+            # Look for messages with inline keyboard buttons (subscription buttons)
+            if not msg.reply_markup:
+                continue
+            # Check if message text mentions subscription keywords
+            text_lower = (msg.text or msg.caption or "").lower()
+            sub_keywords = ["подписат", "subscribe", "вступи", "подпис", "канал"]
+            if not any(kw in text_lower for kw in sub_keywords):
+                continue
+
+            # Extract channel links from buttons
+            for row in msg.reply_markup.inline_keyboard:
+                for btn in row:
+                    url = btn.url
+                    if not url:
+                        continue
+                    # Parse t.me/channel or t.me/+invite links
+                    m = re.match(r"https?://t\.me/\+?([\w]+)", url)
+                    if not m:
+                        continue
+                    target = m.group(1)
+                    try:
+                        if url.startswith("https://t.me/+") or "/joinchat/" in url:
+                            await client.join_chat(url)
+                        else:
+                            await client.join_chat(target)
+                        logger.info(f"[promo] авто-подписка: {url}")
+                    except Exception:
+                        pass
+            # Only process the first matching message
+            break
+    except Exception as e:
+        logger.debug(f"[promo] _join_required_channels: {e}")
+
+
 async def _send_promo_message(account, chat, message, camp):
     """Send a single promo message to a chat."""
     chat_target = f"@{chat['username']}" if chat["username"] else chat["chat_id"]
@@ -160,6 +204,9 @@ async def _send_promo_message(account, chat, message, camp):
             await client.join_chat(str(chat_target))
         except Exception:
             pass
+
+        # Auto-subscribe to required channels (anti-spam bot bypass)
+        await _join_required_channels(client, chat_target)
 
         # Apply UTM variables
         text = spin(message["text"])
