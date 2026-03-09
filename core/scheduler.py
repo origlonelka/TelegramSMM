@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from db.database import execute, fetch_all
+from db.database import execute, fetch_one, fetch_all
 from services.commenter import run_campaign
 from services.story_viewer import run_story_campaign
 from services.subscriber import run_subscribe_campaign
