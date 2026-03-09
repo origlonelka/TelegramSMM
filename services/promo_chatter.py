@@ -12,6 +12,8 @@ from pyrogram.errors import (
     FloodWait, PeerFlood, UserBannedInChannel,
     AuthKeyUnregistered, UserDeactivated, UserDeactivatedBan, SessionRevoked,
     ChatWriteForbidden, SlowmodeWait,
+    UsernameNotOccupied, UsernameInvalid, InviteHashExpired,
+    ChannelInvalid, ChannelPrivate, ChatInvalid,
 )
 from db.database import execute, fetch_one, fetch_all, execute_returning, execute_no_fk, delete_account
 from services.account_manager import ensure_connected, disconnect
@@ -210,6 +212,21 @@ async def _send_promo_message(account, chat, message, camp):
         await execute(
             "UPDATE promo_chats SET error_count = error_count + 1 WHERE id = ?",
             (chat["id"],))
+
+    except (UsernameNotOccupied, UsernameInvalid, InviteHashExpired,
+            ChannelInvalid, ChannelPrivate, ChatInvalid) as e:
+        logger.warning(f"Промо-чат {chat_target} невалиден ({type(e).__name__}), удаляю")
+        await execute(
+            "DELETE FROM campaign_promo_chats WHERE promo_chat_id = ?",
+            (chat["id"],))
+        await execute(
+            "DELETE FROM promo_chats WHERE id = ?",
+            (chat["id"],))
+        await execute_no_fk(
+            "INSERT INTO logs (campaign_id, account_id, channel_id, message_id, "
+            "mode, status, error) VALUES (?, ?, ?, ?, 'promo_chats', 'error', ?)",
+            (camp["id"], account["id"], chat["id"], message["id"],
+             f"DELETED CHAT: {e}"))
 
     except (PeerFlood, UserBannedInChannel, ChatWriteForbidden) as e:
         logger.error(f"Аккаунт #{account['id']} ограничен в {chat_target}: {e}")
